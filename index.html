@@ -6,10 +6,6 @@
 <meta name="theme-color" content="#C8420A">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>StockCI Pro</title>
-<link rel="manifest" href="/manifest.json">
-<meta name="apple-mobile-web-app-title" content="StockCI Pro">
-<meta name="mobile-web-app-capable" content="yes">
-<script>if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js");</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 
@@ -1111,16 +1107,17 @@ function renderVente() {
   if(venteFilter!=='all') prods=prods.filter(p=>(p.cat||'Sans catégorie')===venteFilter);
   const el=document.getElementById('vente-list');
   if(!prods.length){el.innerHTML='<div class="empty-state"><div class="empty-ico">🛒</div><div class="empty-title">Aucun produit disponible</div></div>';updateCartBar();return;}
-  el.innerHTML=prods.map(p=>{const qty=cart[p.id]||0;return`<div class="vente-card ${qty>0?'in-cart':''}"><div class="vente-info" onclick="${qty===0?`addToCart('${p.id}')`:''};void(0)"><div class="vente-name">${p.nom}</div><div class="vente-meta">${fmoney(p.prix)} FCFA / ${p.unite} · Stock: ${p.qty}</div></div><div class="qty-ctrl">${qty>0?`<button class="qty-btn" onclick="changeCart('${p.id}',-1)">−</button><span class="qty-num">${qty}</span><button class="qty-btn" onclick="changeCart('${p.id}',1)">+</button>`:`<button class="qty-btn" style="width:36px;height:36px;font-size:20px" onclick="addToCart('${p.id}')">+</button>`}</div></div>`;}).join('');
+  el.innerHTML=prods.map(p=>{const qty=cart[p.id]?.qty||0;const prixV=cart[p.id]?.prix||p.prix;return`<div class="vente-card ${qty>0?'in-cart':''}"><div class="vente-info" onclick="${qty===0?`addToCart('${p.id}')`:''};void(0)"><div class="vente-name">${p.nom}</div><div class="vente-meta">${fmoney(prixV)} FCFA / ${p.unite} · Stock: ${p.qty}</div>${qty>0?`<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:11px;color:var(--text3)">Prix:</span><input type="number" value="${prixV}" min="0" style="width:100px;padding:4px 8px;border:1.5px solid var(--or);border-radius:6px;font-size:13px;font-weight:700;color:var(--or);background:var(--surface);font-family:'JetBrains Mono',monospace" oninput="updateCartPrice('${p.id}',+this.value)" onclick="this.select()">${prixV!==p.prix?`<span style="font-size:10px;color:var(--text3);text-decoration:line-through">${fmoney(p.prix)}</span>`:''}</div>`:''}</div><div class="qty-ctrl">${qty>0?`<button class="qty-btn" onclick="changeCart('${p.id}',-1)">−</button><span class="qty-num">${qty}</span><button class="qty-btn" onclick="changeCart('${p.id}',1)">+</button>`:`<button class="qty-btn" style="width:36px;height:36px;font-size:20px" onclick="addToCart('${p.id}')">+</button>`}</div></div>`;}).join('');
   updateCartBar();
 }
 
-function addToCart(id){const p=getProducts().find(x=>x.id===id);if(!p||p.qty<=0)return;cart[id]=Math.min((cart[id]||0)+1,p.qty);renderVente();}
-function changeCart(id,delta){const p=getProducts().find(x=>x.id===id);if(!p)return;const n=(cart[id]||0)+delta;if(n<=0)delete cart[id];else cart[id]=Math.min(n,p.qty);renderVente();}
+function addToCart(id){const p=getProducts().find(x=>x.id===id);if(!p||p.qty<=0)return;if(cart[id]){cart[id].qty=Math.min(cart[id].qty+1,p.qty);}else{cart[id]={qty:1,prix:p.prix};}renderVente();}
+function changeCart(id,delta){const p=getProducts().find(x=>x.id===id);if(!p)return;if(!cart[id])return;const n=cart[id].qty+delta;if(n<=0)delete cart[id];else cart[id].qty=Math.min(n,p.qty);renderVente();}
+function updateCartPrice(id,prix){if(cart[id])cart[id].prix=prix>0?prix:0;updateCartBar();}
 
 function updateCartBar() {
   const prods=getProducts();let total=0,items=0;
-  for(const [id,qty] of Object.entries(cart)){const p=prods.find(x=>x.id===id);if(p){total+=p.prix*qty;items+=qty;}}
+  for(const [id,obj] of Object.entries(cart)){const p=prods.find(x=>x.id===id);if(p){total+=(obj.prix||p.prix)*obj.qty;items+=obj.qty;}}
   const bar=document.getElementById('cart-bar'),badge=document.getElementById('cart-badge');
   if(items>0){bar.classList.add('show');badge.style.display='flex';badge.textContent=items;document.getElementById('cart-total-val').textContent=fmoney(total)+' FCFA';document.getElementById('cart-items-info').textContent=items+' article(s)';}
   else{bar.classList.remove('show');badge.style.display='none';}
@@ -1131,7 +1128,7 @@ function clearCart(){cart={};renderVente();}
 // ── CHECKOUT ──
 function openCheckout() {
   const prods=getProducts();let total=0;
-  for(const [id,qty] of Object.entries(cart)){const p=prods.find(x=>x.id===id);if(p)total+=p.prix*qty;}
+  for(const [id,obj] of Object.entries(cart)){const p=prods.find(x=>x.id===id);if(p)total+=(obj.prix||p.prix)*obj.qty;}
   if(total===0)return;
   document.getElementById('checkout-total-display').textContent=fmoney(total)+' FCFA';
   document.getElementById('co-client-nom').value='';document.getElementById('co-client-tel').value='';
@@ -1150,7 +1147,7 @@ function selectPaiement(mode) {
 
 function calcMonnaie() {
   const prods=getProducts();let total=0;
-  for(const [id,qty] of Object.entries(cart)){const p=prods.find(x=>x.id===id);if(p)total+=p.prix*qty;}
+  for(const [id,obj] of Object.entries(cart)){const p=prods.find(x=>x.id===id);if(p)total+=(obj.prix||p.prix)*obj.qty;}
   const recu=parseFloat(document.getElementById('co-recu').value)||0;
   const monnaie=recu-total;
   const disp=document.getElementById('monnaie-display');
@@ -1163,12 +1160,12 @@ function calcMonnaie() {
 
 function validateSale() {
   const prods=getProducts(),lignes=[];let total=0,benefice=0;
-  for(const [id,qty] of Object.entries(cart)){const p=prods.find(x=>x.id===id);if(p){const st=p.prix*qty,ben=(p.prix-(p.achat||0))*qty;lignes.push({id:p.id,nom:p.nom,prix:p.prix,achat:p.achat||0,qty,unite:p.unite,sous_total:st,benefice:ben});total+=st;benefice+=ben;}}
+  for(const [id,obj] of Object.entries(cart)){const p=prods.find(x=>x.id===id);if(p){const prixV=obj.prix||p.prix;const st=prixV*obj.qty,ben=(prixV-(p.achat||0))*obj.qty;lignes.push({id:p.id,nom:p.nom,prix:prixV,prixCatalogue:p.prix,achat:p.achat||0,qty:obj.qty,unite:p.unite,sous_total:st,benefice:ben});total+=st;benefice+=ben;}}
   if(!lignes.length)return;
   const recu=parseFloat(document.getElementById('co-recu').value)||0;
   const monnaie=selectedPaiement==='Espèces'&&recu>0?recu-total:null;
   if(selectedPaiement==='Espèces'&&recu>0&&recu<total){toast('Montant reçu insuffisant','error');return;}
-  const np=prods.map(p=>cart[p.id]?{...p,qty:p.qty-cart[p.id]}:p);setProducts(np);
+  const np=prods.map(p=>cart[p.id]?{...p,qty:p.qty-cart[p.id].qty}:p);setProducts(np);
   const num=getCounter();setCounter(num+1);
   const vente={id:Date.now().toString(),date:new Date().toISOString(),lignes,total,benefice,num:'REÇ-'+String(num).padStart(4,'0'),paiement:selectedPaiement,montantRecu:recu||null,monnaie,client:{nom:document.getElementById('co-client-nom').value.trim(),tel:document.getElementById('co-client-tel').value.trim()}};
   const arr=getVentes();arr.unshift(vente);setVentes(arr);currentVente=vente;
