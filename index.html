@@ -406,9 +406,15 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 
 <!-- HISTORIQUE -->
 <div class="page" id="page-historique">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
     <div class="page-title" style="margin-bottom:0">Historique</div>
     <div style="font-size:12px;font-weight:700;color:var(--text3)" id="hist-total"></div>
+  </div>
+  <!-- ONGLETS -->
+  <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:2px solid var(--border);padding-bottom:0">
+    <button onclick="switchHist('ventes')" id="htab-ventes" style="flex:1;padding:10px 8px;border:none;background:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid var(--or);color:var(--or);margin-bottom:-2px">🛒 Ventes</button>
+    <button onclick="switchHist('stock')" id="htab-stock" style="flex:1;padding:10px 8px;border:none;background:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;color:var(--text3);margin-bottom:-2px">📦 Stock</button>
+    <button onclick="switchHist('depenses')" id="htab-depenses" style="flex:1;padding:10px 8px;border:none;background:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;color:var(--text3);margin-bottom:-2px">💸 Dépenses</button>
   </div>
   <div id="hist-list"></div>
 </div>
@@ -1060,7 +1066,9 @@ function quickStock(id) {
   const p=getProducts().find(x=>x.id===id);if(!p)return;
   const n=prompt(`Ajouter au stock de "${p.nom}"\nActuellement: ${p.qty} ${p.unite}\nQuantité à ajouter ?`);
   if(!n||isNaN(+n)||+n<=0)return;
-  const arr=getProducts();arr[arr.findIndex(x=>x.id===id)].qty+=+n;setProducts(arr);renderStock();renderAccueil();toast(`+${n} ${p.unite} ajouté ✅`,'success');
+  const arr=getProducts();arr[arr.findIndex(x=>x.id===id)].qty+=+n;setProducts(arr);
+  addStockMouvement('ajout',p.nom,`+${n} ${p.unite} ajouté(s) · Nouveau stock: ${p.qty+parseInt(n)} ${p.unite}`);
+  renderStock();renderAccueil();toast(`+${n} ${p.unite} ajouté ✅`,'success');
 }
 
 function openAddProduct() {
@@ -1087,7 +1095,8 @@ function saveProduct() {
   if(!nom){toast('Nom obligatoire','error');return;}if(isNaN(prix)||prix<0){toast('Prix obligatoire','error');return;}if(isNaN(qty)||qty<0){toast('Quantité obligatoire','error');return;}
   const prods=getProducts(),id=document.getElementById('p-id').value;
   const prod={id:id||Date.now().toString(),nom,cat:document.getElementById('p-cat').value.trim(),unite:document.getElementById('p-unite').value.trim()||'unité',prix,achat:isPatron?parseFloat(document.getElementById('p-achat').value)||0:(id?getProducts().find(x=>x.id===id)?.achat||0:0),qty,seuil:parseFloat(document.getElementById('p-seuil').value)||5,ref:document.getElementById('p-ref').value.trim()};
-  if(id){const i=prods.findIndex(x=>x.id===id);prods[i]=prod;}else prods.unshift(prod);
+  if(id){const i=prods.findIndex(x=>x.id===id);prods[i]=prod;addStockMouvement('modif',prod.nom,`Modifié · Prix: ${fmoney(prod.prix)} F · Stock: ${prod.qty} ${prod.unite}`);}
+  else{prods.unshift(prod);addStockMouvement('ajout',prod.nom,`Ajouté · Prix: ${fmoney(prod.prix)} F · Stock initial: ${prod.qty} ${prod.unite}`);}
   setProducts(prods);closeModal('modal-product');renderStock();renderAccueil();toast(id?'Produit mis à jour ✅':'Produit ajouté ✅','success');
 }
 
@@ -1107,13 +1116,55 @@ function renderVente() {
   if(venteFilter!=='all') prods=prods.filter(p=>(p.cat||'Sans catégorie')===venteFilter);
   const el=document.getElementById('vente-list');
   if(!prods.length){el.innerHTML='<div class="empty-state"><div class="empty-ico">🛒</div><div class="empty-title">Aucun produit disponible</div></div>';updateCartBar();return;}
-  el.innerHTML=prods.map(p=>{const qty=cart[p.id]?.qty||0;const prixV=cart[p.id]?.prix||p.prix;return`<div class="vente-card ${qty>0?'in-cart':''}"><div class="vente-info" onclick="${qty===0?`addToCart('${p.id}')`:''};void(0)"><div class="vente-name">${p.nom}</div><div class="vente-meta">${fmoney(prixV)} FCFA / ${p.unite} · Stock: ${p.qty}</div>${qty>0?`<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span style="font-size:11px;color:var(--text3)">Prix:</span><input type="number" value="${prixV}" min="0" style="width:100px;padding:4px 8px;border:1.5px solid var(--or);border-radius:6px;font-size:13px;font-weight:700;color:var(--or);background:var(--surface);font-family:'JetBrains Mono',monospace" oninput="updateCartPrice('${p.id}',+this.value)" onclick="this.select()">${prixV!==p.prix?`<span style="font-size:10px;color:var(--text3);text-decoration:line-through">${fmoney(p.prix)}</span>`:''}</div>`:''}</div><div class="qty-ctrl">${qty>0?`<button class="qty-btn" onclick="changeCart('${p.id}',-1)">−</button><span class="qty-num">${qty}</span><button class="qty-btn" onclick="changeCart('${p.id}',1)">+</button>`:`<button class="qty-btn" style="width:36px;height:36px;font-size:20px" onclick="addToCart('${p.id}')">+</button>`}</div></div>`;}).join('');
+  el.innerHTML=prods.map(p=>{
+    const qty=cart[p.id]?.qty||0;
+    const prixV=cart[p.id]?.prix||p.prix;
+    const prixModifie=qty>0&&cart[p.id]?.prix!==p.prix;
+    return`<div class="vente-card ${qty>0?'in-cart':''}">
+      <div class="vente-info" style="flex:1;min-width:0">
+        <div class="vente-name">${p.nom}</div>
+        <div class="vente-meta" style="margin-bottom:${qty>0?'8px':'0'}">${fmoney(p.prix)} FCFA / ${p.unite} · Stock: ${p.qty}</div>
+        ${qty>0?`
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px;background:${prixModifie?'var(--yellow-pale)':'var(--or-pale)'};border:1.5px solid ${prixModifie?'var(--yellow)':'var(--or)'};border-radius:8px;padding:5px 10px">
+            <span style="font-size:11px;color:var(--text2);font-weight:600">Prix vente:</span>
+            <input
+              type="number"
+              value="${prixV}"
+              min="0"
+              style="width:90px;border:none;background:transparent;font-size:14px;font-weight:800;color:${prixModifie?'var(--yellow)':'var(--or)'};font-family:'JetBrains Mono',monospace;outline:none;text-align:right"
+              oninput="updateCartPrice('${p.id}',+this.value);renderVentePrix('${p.id}',this.value,${p.prix})"
+              onclick="this.select()"
+            >
+            <span style="font-size:10px;font-weight:600;color:var(--text3)">F</span>
+          </div>
+          ${prixModifie?`<span style="font-size:10px;color:var(--text3);text-decoration:line-through">${fmoney(p.prix)} F</span><span style="font-size:10px;font-weight:700;color:var(--yellow)">Prix modifié</span>`:''}
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Sous-total: <strong style="color:var(--or)">${fmoney(prixV*qty)} FCFA</strong></div>
+        `:''}
+      </div>
+      <div class="qty-ctrl" style="flex-shrink:0;margin-left:8px">
+        ${qty>0
+          ?`<button class="qty-btn" onclick="changeCart('${p.id}',-1)">−</button>
+            <span class="qty-num">${qty}</span>
+            <button class="qty-btn" onclick="changeCart('${p.id}',1)">+</button>`
+          :`<button class="qty-btn" style="width:36px;height:36px;font-size:20px" onclick="addToCart('${p.id}')">+</button>`
+        }
+      </div>
+    </div>`;
+  }).join('');
   updateCartBar();
 }
 
 function addToCart(id){const p=getProducts().find(x=>x.id===id);if(!p||p.qty<=0)return;if(cart[id]){cart[id].qty=Math.min(cart[id].qty+1,p.qty);}else{cart[id]={qty:1,prix:p.prix};}renderVente();}
 function changeCart(id,delta){const p=getProducts().find(x=>x.id===id);if(!p)return;if(!cart[id])return;const n=cart[id].qty+delta;if(n<=0)delete cart[id];else cart[id].qty=Math.min(n,p.qty);renderVente();}
 function updateCartPrice(id,prix){if(cart[id])cart[id].prix=prix>0?prix:0;updateCartBar();}
+function renderVentePrix(id,newPrix,prixCatalogue){
+  // Met à jour juste le sous-total sans tout re-rendre
+  const qty=cart[id]?.qty||0;
+  const p=parseFloat(newPrix)||0;
+  updateCartBar();
+}
 
 function updateCartBar() {
   const prods=getProducts();let total=0,items=0;
@@ -1169,6 +1220,8 @@ function validateSale() {
   const num=getCounter();setCounter(num+1);
   const vente={id:Date.now().toString(),date:new Date().toISOString(),lignes,total,benefice,num:'REÇ-'+String(num).padStart(4,'0'),paiement:selectedPaiement,montantRecu:recu||null,monnaie,client:{nom:document.getElementById('co-client-nom').value.trim(),tel:document.getElementById('co-client-tel').value.trim()}};
   const arr=getVentes();arr.unshift(vente);setVentes(arr);currentVente=vente;
+  // Enregistrer mouvement stock pour chaque ligne vendue
+  lignes.forEach(l=>addStockMouvement('vente',l.nom,`Vendu: ${l.qty} ${l.unite} × ${fmoney(l.prix)} F = ${fmoney(l.sous_total)} F`));
   closeModal('modal-checkout');
   document.getElementById('recu-display').innerHTML=buildRecuHTML(vente);
   openModal('modal-recu');
@@ -1304,20 +1357,89 @@ function shareWA(v){if(!v)return;window.open('https://wa.me/?text='+encodeURICom
 function copyRecu(v){if(!v)return;navigator.clipboard.writeText(buildRecuText(v)).then(()=>toast('Reçu copié ✅','success')).catch(()=>toast('Impossible de copier','error'));}
 
 // ── HISTORIQUE ──
+// ── HISTORIQUE UNIFIÉ ──
+let histTab = 'ventes';
+
+function switchHist(tab) {
+  histTab = tab;
+  ['ventes','stock','depenses'].forEach(t => {
+    const btn = document.getElementById('htab-'+t);
+    if(t===tab) { btn.style.borderBottomColor='var(--or)'; btn.style.color='var(--or)'; }
+    else { btn.style.borderBottomColor='transparent'; btn.style.color='var(--text3)'; }
+  });
+  renderHistorique();
+}
+
 function renderHistorique() {
-  const ventes=getVentes(),el=document.getElementById('hist-list');
-  if(!ventes.length){el.innerHTML='<div class="empty-state"><div class="empty-ico">📋</div><div class="empty-title">Aucune vente</div></div>';document.getElementById('hist-total').textContent='';return;}
-  document.getElementById('hist-total').textContent=fmoney(ventes.reduce((s,v)=>s+v.total,0))+' FCFA total';
-  const groups={};
-  ventes.forEach(v=>{const k=new Date(v.date).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});if(!groups[k])groups[k]=[];groups[k].push(v);});
-  el.innerHTML=Object.entries(groups).map(([date,vs])=>`
-    <div class="hist-group-lbl">${date}</div>
-    ${vs.map(v=>`<div class="hist-card" onclick="showHistDetail('${v.id}')">
-      <div class="hist-top"><div><div class="hist-num">${v.num}${v.paiement?` · ${v.paiement}`:''}</div>${v.client?.nom?`<div style="font-size:11px;color:var(--text3);margin-top:2px">👤 ${v.client.nom}</div>`:''}<div class="hist-time">${new Date(v.date).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</div></div><div class="hist-montant">${fmoney(v.total)} F</div></div>
-      <div class="hist-items">${v.lignes.map(l=>`${l.nom} ×${l.qty}`).join(' · ')}</div>
-      ${isPatron&&v.benefice?`<div style="font-size:11px;color:var(--green);font-weight:600;margin-top:5px">Bénéfice: +${fmoney(v.benefice)} FCFA</div>`:''}
-    </div>`).join('')}
-  `).join('');
+  const el = document.getElementById('hist-list');
+  const htotal = document.getElementById('hist-total');
+
+  if(histTab === 'ventes') {
+    const ventes = getVentes();
+    if(!ventes.length) { el.innerHTML='<div class="empty-state"><div class="empty-ico">🛒</div><div class="empty-title">Aucune vente enregistrée</div></div>'; htotal.textContent=''; return; }
+    htotal.textContent = fmoney(ventes.reduce((s,v)=>s+v.total,0))+' FCFA';
+    const groups={};
+    ventes.forEach(v=>{const k=new Date(v.date).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});if(!groups[k])groups[k]=[];groups[k].push(v);});
+    el.innerHTML=Object.entries(groups).map(([date,vs])=>`
+      <div class="hist-group-lbl">${date}</div>
+      ${vs.map(v=>`<div class="hist-card" onclick="showHistDetail('${v.id}')">
+        <div class="hist-top">
+          <div>
+            <div class="hist-num">${v.num}${v.paiement?` · ${v.paiement}`:''}</div>
+            ${v.client?.nom?`<div style="font-size:11px;color:var(--text3);margin-top:2px">👤 ${v.client.nom}</div>`:''}
+            <div class="hist-time">${new Date(v.date).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</div>
+          </div>
+          <div class="hist-montant">${fmoney(v.total)} F</div>
+        </div>
+        <div class="hist-items">${v.lignes.map(l=>l.nom+' ×'+l.qty).join(' · ')}</div>
+        ${isPatron&&v.benefice?`<div style="font-size:11px;color:var(--green);font-weight:600;margin-top:5px">Bénéfice: +${fmoney(v.benefice)} FCFA</div>`:''}
+      </div>`).join('')}
+    `).join('');
+
+  } else if(histTab === 'stock') {
+    const mouvs = getStockMouvements();
+    if(!mouvs.length) { el.innerHTML='<div class="empty-state"><div class="empty-ico">📦</div><div class="empty-title">Aucun mouvement de stock</div><div class="empty-sub">Les ajouts et modifications de produits apparaîtront ici</div></div>'; htotal.textContent=''; return; }
+    htotal.textContent = mouvs.length + ' mouvement(s)';
+    const groups={};
+    mouvs.forEach(m=>{const k=new Date(m.date).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});if(!groups[k])groups[k]=[];groups[k].push(m);});
+    el.innerHTML=Object.entries(groups).map(([date,ms])=>`
+      <div class="hist-group-lbl">${date}</div>
+      ${ms.map(m=>`<div class="hist-card">
+        <div class="hist-top">
+          <div>
+            <div style="font-size:14px;font-weight:700">${m.produit}</div>
+            <div class="hist-time">${new Date(m.date).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</div>
+          </div>
+          <div style="text-align:right">
+            <span style="font-size:13px;font-weight:800;padding:4px 10px;border-radius:20px;${m.type==='ajout'?'background:var(--green-pale);color:var(--green)':m.type==='vente'?'background:var(--or-pale);color:var(--or)':'background:var(--blue-pale);color:var(--blue)'}">
+              ${m.type==='ajout'?'➕ Ajout':m.type==='vente'?'🛒 Vente':'✏️ Modif.'}
+            </span>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--text2);margin-top:6px">${m.detail}</div>
+      </div>`).join('')}
+    `).join('');
+
+  } else if(histTab === 'depenses') {
+    const depenses = [...getDepenses()].sort((a,b)=>new Date(b.date)-new Date(a.date));
+    if(!depenses.length) { el.innerHTML='<div class="empty-state"><div class="empty-ico">💸</div><div class="empty-title">Aucune dépense enregistrée</div></div>'; htotal.textContent=''; return; }
+    const total = depenses.reduce((s,d)=>s+d.montant,0);
+    htotal.textContent = fmoney(total)+' FCFA';
+    const groups={};
+    depenses.forEach(d=>{const k=new Date(d.date).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});if(!groups[k])groups[k]=[];groups[k].push(d);});
+    el.innerHTML=Object.entries(groups).map(([date,ds])=>`
+      <div class="hist-group-lbl">${date}</div>
+      ${ds.map(d=>`<div class="hist-card">
+        <div class="hist-top">
+          <div>
+            <div style="font-size:14px;font-weight:700">${d.cat}</div>
+            ${d.desc?`<div style="font-size:12px;color:var(--text2);margin-top:2px">${d.desc}</div>`:''}
+          </div>
+          <div style="font-size:16px;font-weight:800;color:var(--red)">-${fmoney(d.montant)} F</div>
+        </div>
+      </div>`).join('')}
+    `).join('');
+  }
 }
 
 function showHistDetail(id) {
@@ -1325,6 +1447,16 @@ function showHistDetail(id) {
   currentHist=v;
   document.getElementById('hist-recu-display').innerHTML=buildRecuHTML(v);
   openModal('modal-hist');
+}
+
+// ── MOUVEMENTS STOCK ──
+function getStockMouvements() { return S.get('sci_mouvs') || []; }
+function addStockMouvement(type, produit, detail) {
+  const mouvs = getStockMouvements();
+  mouvs.unshift({ id:Date.now().toString(), date:new Date().toISOString(), type, produit, detail });
+  // Garder max 500 entrées
+  if(mouvs.length > 500) mouvs.splice(500);
+  S.set('sci_mouvs', mouvs);
 }
 
 // ── PARAMÈTRES ──
@@ -1775,7 +1907,7 @@ function exportRapportWA(){
 
 // ── IMPORT/EXPORT ──
 function exportData(){
-  const data={products:getProducts(),ventes:getVentes(),shop:getShop(),settings:getSettings(),counter:getCounter(),pin:getPin(),credits:getCredits(),fournisseurs:getFournisseurs(),devis:getDevisList(),depenses:getDepenses(),dvctr:getDevisCounter(),version:'5.0',exportDate:new Date().toISOString()};
+  const data={products:getProducts(),ventes:getVentes(),shop:getShop(),settings:getSettings(),counter:getCounter(),pin:getPin(),credits:getCredits(),fournisseurs:getFournisseurs(),devis:getDevisList(),depenses:getDepenses(),dvctr:getDevisCounter(),mouvements:getStockMouvements(),version:'6.0',exportDate:new Date().toISOString()};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='stockci-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(url);toast('Export réussi ✅','success');
 }
@@ -1784,9 +1916,10 @@ function importData(evt){
   const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(!d.products||!d.ventes)throw new Error();if(!confirm('Remplacer toutes les données ?'))return;
   if(d.products)setProducts(d.products);if(d.ventes)setVentes(d.ventes);if(d.shop)setShop(d.shop);if(d.settings)setSettings(d.settings);if(d.counter)setCounter(d.counter);if(d.pin)setPin(d.pin);
   if(d.credits)setCredits(d.credits);if(d.fournisseurs)setFournisseurs(d.fournisseurs);if(d.devis)setDevisList(d.devis);if(d.depenses)setDepenses(d.depenses);if(d.dvctr)setDevisCounter(d.dvctr);
+  if(d.mouvements)S.set('sci_mouvs',d.mouvements);
   applyTheme();renderAccueil();renderStock();toast('Import réussi ✅','success');}catch{toast('Fichier invalide ❌','error');}};r.readAsText(file);evt.target.value='';
 }
-function resetAll(){if(!confirm('⚠️ Supprimer TOUTES les données ?'))return;if(!confirm('Dernière confirmation — irréversible.'))return;['sci_prod','sci_vent','sci_shop','sci_set','sci_ctr','sci_pin','sci_credits','sci_fourns','sci_devis','sci_depenses','sci_dvctr'].forEach(k=>S.del(k));location.reload();}
+function resetAll(){if(!confirm('⚠️ Supprimer TOUTES les données ?'))return;if(!confirm('Dernière confirmation — irréversible.'))return;['sci_prod','sci_vent','sci_shop','sci_set','sci_ctr','sci_pin','sci_credits','sci_fourns','sci_devis','sci_depenses','sci_dvctr','sci_mouvs'].forEach(k=>S.del(k));location.reload();}
 
 // ── UTILS ──
 function fmoney(n){return Math.round(n||0).toLocaleString('fr-FR');}
