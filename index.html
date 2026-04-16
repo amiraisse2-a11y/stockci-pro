@@ -2,6 +2,12 @@
 <html lang="fr" data-theme="light">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="-1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#C8420A">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -239,6 +245,73 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 .c6{background:#BE185D}.c7{background:#4D7C0F}
 
 @media(min-width:480px){.stats-grid{grid-template-columns:1fr 1fr 1fr}}
+
+/* BANNIÈRE INSTALLATION PWA */
+#install-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(135deg, #C8420A, #E8550F);
+  color: white;
+  padding: 14px 16px;
+  z-index: 9999;
+  display: none;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 -4px 20px rgba(200,66,10,0.4);
+  animation: slideUp .3s ease;
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+#install-banner .install-icon {
+  width: 44px;
+  height: 44px;
+  background: white;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+#install-banner .install-text {
+  flex: 1;
+}
+#install-banner .install-title {
+  font-size: 14px;
+  font-weight: 800;
+  margin-bottom: 2px;
+}
+#install-banner .install-sub {
+  font-size: 11px;
+  opacity: .85;
+}
+#install-banner .install-btn {
+  background: white;
+  color: #C8420A;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  flex-shrink: 0;
+}
+#install-banner .install-close {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px;
+  opacity: .8;
+  flex-shrink: 0;
+}
+
 </style>
 
 <!-- ═══════════════════════════════════════════
@@ -325,8 +398,372 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 /* Zone print cachée à l'écran */
 #print-zone { display: none; }
 </style>
+
+<!-- SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPA_URL = 'https://tykskoalodinrhiekuqg.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5a3Nrb2Fsb2RpbnJoaWVrdXFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTkwNzEsImV4cCI6MjA5MTY3NTA3MX0.f11LVgJ4CwDnUQ1DQgabNWdocpY6z2YIzyCjm0Skv3k';
+const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
+</script>
+<script>
+
+// ════════════════════════════════════════
+// SUPABASE — SYNC MULTI-APPAREILS
+// ════════════════════════════════════════
+
+let boutiqueCode = localStorage.getItem('sci_boutique_code') || null;
+let syncEnCours = false;
+
+// ── GÉNÉRER CODE BOUTIQUE UNIQUE ──
+function genCode(nom) {
+  const prefix = nom.replace(/[^a-zA-Z]/g,'').toUpperCase().slice(0,4).padEnd(4,'X');
+  const suffix = Math.floor(1000 + Math.random() * 9000);
+  return prefix + suffix;
+}
+
+// ── INSCRIPTION NOUVELLE BOUTIQUE ──
+async function inscrireBoutique(shop, pin, secretQ) {
+  try {
+    showSyncStatus('Création de votre boutique...');
+    const code = genCode(shop.nom);
+    const { data, error } = await supa.from('boutiques').insert({
+      code,
+      nom: shop.nom,
+      ville: shop.ville || '',
+      tel: shop.tel || '',
+      activite: shop.activite || '',
+      adresse: shop.adresse || '',
+      footer: shop.footer || 'Merci pour votre confiance !',
+      pin: pin,
+      secret_question: secretQ.question || '',
+      secret_reponse: secretQ.reponse || ''
+    }).select().single();
+
+    if (error) throw error;
+
+    boutiqueCode = code;
+    localStorage.setItem('sci_boutique_code', code);
+    hideSyncStatus();
+    return { success: true, code };
+  } catch(e) {
+    hideSyncStatus();
+    console.error('Erreur inscription:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+// ── CONNEXION BOUTIQUE EXISTANTE ──
+async function connecterBoutique(code, pin) {
+  try {
+    showSyncStatus('Connexion...');
+    const { data, error } = await supa
+      .from('boutiques')
+      .select('*')
+      .eq('code', code.toUpperCase())
+      .single();
+
+    if (error || !data) {
+      hideSyncStatus();
+      return { success: false, error: 'Code boutique introuvable' };
+    }
+    if (data.pin !== pin) {
+      hideSyncStatus();
+      return { success: false, error: 'PIN incorrect' };
+    }
+    if (data.actif === false) {
+      hideSyncStatus();
+      return { success: false, error: 'Cette boutique est suspendue. Contactez le support StockCI.' };
+    }
+
+    boutiqueCode = data.code;
+    localStorage.setItem('sci_boutique_code', data.code);
+
+    // Charger les données depuis le serveur
+    await pullFromServer();
+    hideSyncStatus();
+    return { success: true, boutique: data };
+  } catch(e) {
+    hideSyncStatus();
+    return { success: false, error: e.message };
+  }
+}
+
+// ── PUSH — Envoyer données locales vers serveur ──
+async function pushToServer() {
+  if (!boutiqueCode || syncEnCours || !navigator.onLine) return;
+  syncEnCours = true;
+
+  try {
+    const code = boutiqueCode;
+
+    // Produits
+    const prods = getProducts();
+    if (prods.length) {
+      const rows = prods.map(p => ({
+        id: p.id, boutique_code: code,
+        nom: p.nom, cat: p.cat||'', unite: p.unite||'unité',
+        prix: p.prix||0, achat: p.achat||0,
+        qty: p.qty||0, seuil: p.seuil||5, ref: p.ref||''
+      }));
+      await supa.from('produits').upsert(rows, { onConflict: 'id' });
+    }
+
+    // Ventes
+    const ventes = getVentes();
+    if (ventes.length) {
+      const rows = ventes.map(v => ({
+        id: v.id, boutique_code: code,
+        num: v.num, date: v.date,
+        total: v.total||0, benefice: v.benefice||0,
+        paiement: v.paiement||'Espèces',
+        montant_recu: v.montantRecu||null,
+        monnaie: v.monnaie||null,
+        client_nom: v.client?.nom||'',
+        client_tel: v.client?.tel||'',
+        lignes: v.lignes||[]
+      }));
+      await supa.from('ventes').upsert(rows, { onConflict: 'id' });
+    }
+
+    // Crédits
+    const credits = getCredits();
+    if (credits.length) {
+      const rows = credits.map(c => ({
+        id: c.id, boutique_code: code,
+        nom: c.nom, tel: c.tel||'',
+        description: c.desc||'',
+        montant_initial: c.montantInitial||0,
+        solde: c.solde||0,
+        date: c.date,
+        remboursements: c.remboursements||[]
+      }));
+      await supa.from('credits').upsert(rows, { onConflict: 'id' });
+    }
+
+    // Dépenses
+    const depenses = getDepenses();
+    if (depenses.length) {
+      const rows = depenses.map(d => ({
+        id: d.id, boutique_code: code,
+        cat: d.cat||'Autre', description: d.desc||'',
+        montant: d.montant||0, date: d.date
+      }));
+      await supa.from('depenses').upsert(rows, { onConflict: 'id' });
+    }
+
+    // Fournisseurs
+    const fourns = getFournisseurs();
+    if (fourns.length) {
+      const rows = fourns.map(f => ({
+        id: f.id, boutique_code: code,
+        nom: f.nom, tel: f.tel||'',
+        ville: f.ville||'', produits: f.produits||'', notes: f.notes||''
+      }));
+      await supa.from('fournisseurs').upsert(rows, { onConflict: 'id' });
+    }
+
+    // Devis
+    const devis = getDevisList();
+    if (devis.length) {
+      const rows = devis.map(d => ({
+        id: d.id, boutique_code: code,
+        num: d.num, client: d.client||'', tel: d.tel||'',
+        validite: d.validite||7, total: d.total||0,
+        lignes: d.lignes||[], date: d.date
+      }));
+      await supa.from('devis').upsert(rows, { onConflict: 'id' });
+    }
+
+    localStorage.setItem('sci_last_push', new Date().toISOString());
+    showSyncBadge('✅ Synchronisé');
+
+  } catch(e) {
+    console.error('Push error:', e);
+    showSyncBadge('⚠️ Hors-ligne');
+  } finally {
+    syncEnCours = false;
+  }
+}
+
+// ── PULL — Récupérer données depuis serveur ──
+async function pullFromServer() {
+  if (!boutiqueCode) return;
+  if (!navigator.onLine) {
+    console.log('Hors-ligne — données locales conservées');
+    return;
+  }
+
+  try {
+    const code = boutiqueCode;
+
+    const [prods, ventes, credits, depenses, fourns, devis, boutique] = await Promise.all([
+      supa.from('produits').select('*').eq('boutique_code', code),
+      supa.from('ventes').select('*').eq('boutique_code', code).order('date', { ascending: false }),
+      supa.from('credits').select('*').eq('boutique_code', code),
+      supa.from('depenses').select('*').eq('boutique_code', code),
+      supa.from('fournisseurs').select('*').eq('boutique_code', code),
+      supa.from('devis').select('*').eq('boutique_code', code),
+      supa.from('boutiques').select('*').eq('code', code).single()
+    ]);
+
+    // Mettre à jour localStorage
+    if (prods.data?.length) {
+      setProducts(prods.data.map(p => ({
+        id: p.id, nom: p.nom, cat: p.cat, unite: p.unite,
+        prix: p.prix, achat: p.achat, qty: p.qty,
+        seuil: p.seuil, ref: p.ref
+      })));
+    }
+
+    if (ventes.data?.length) {
+      setVentes(ventes.data.map(v => ({
+        id: v.id, num: v.num, date: v.date,
+        total: v.total, benefice: v.benefice,
+        paiement: v.paiement,
+        montantRecu: v.montant_recu,
+        monnaie: v.monnaie,
+        client: { nom: v.client_nom, tel: v.client_tel },
+        lignes: v.lignes || []
+      })));
+    }
+
+    if (credits.data?.length) {
+      setCredits(credits.data.map(c => ({
+        id: c.id, nom: c.nom, tel: c.tel,
+        desc: c.description,
+        montantInitial: c.montant_initial,
+        solde: c.solde, date: c.date,
+        remboursements: c.remboursements || []
+      })));
+    }
+
+    if (depenses.data?.length) {
+      setDepenses(depenses.data.map(d => ({
+        id: d.id, cat: d.cat, desc: d.description,
+        montant: d.montant, date: d.date
+      })));
+    }
+
+    if (fourns.data?.length) {
+      setFournisseurs(fourns.data.map(f => ({
+        id: f.id, nom: f.nom, tel: f.tel,
+        ville: f.ville, produits: f.produits, notes: f.notes
+      })));
+    }
+
+    if (devis.data?.length) {
+      setDevisList(devis.data.map(d => ({
+        id: d.id, num: d.num, client: d.client, tel: d.tel,
+        validite: d.validite, total: d.total,
+        lignes: d.lignes || [], date: d.date
+      })));
+    }
+
+    if (boutique.data) {
+      const b = boutique.data;
+      setShop({
+        nom: b.nom, ville: b.ville, tel: b.tel,
+        activite: b.activite, adresse: b.adresse, footer: b.footer
+      });
+      setSecretQ({ question: b.secret_question, reponse: b.secret_reponse });
+    }
+
+    localStorage.setItem('sci_last_pull', new Date().toISOString());
+    showSyncBadge('✅ Synchronisé');
+
+  } catch(e) {
+    console.error('Pull error:', e);
+  }
+}
+
+// ── SYNC AUTO — toutes les 30 secondes si connecté ──
+function startAutoSync() {
+  if (!boutiqueCode) return;
+  // Push immédiat
+  setTimeout(pushToServer, 2000);
+  // Puis toutes les 30 secondes
+  setInterval(() => {
+    if (navigator.onLine) pushToServer();
+  }, 30000);
+}
+
+// ── UI SYNC STATUS ──
+function showSyncStatus(msg) {
+  let el = document.getElementById('sync-status');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'sync-status';
+    el.style.cssText = 'position:fixed;top:64px;left:0;right:0;background:#1A5FAB;color:white;text-align:center;padding:8px;font-size:12px;font-weight:600;z-index:999;font-family:Plus Jakarta Sans,sans-serif';
+    document.body.appendChild(el);
+  }
+  el.textContent = '🔄 ' + msg;
+  el.style.display = 'block';
+}
+
+function hideSyncStatus() {
+  const el = document.getElementById('sync-status');
+  if (el) el.style.display = 'none';
+}
+
+function showSyncBadge(msg) {
+  let el = document.getElementById('sync-badge');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'sync-badge';
+    el.style.cssText = 'position:fixed;bottom:72px;right:12px;background:rgba(15,122,70,0.9);color:white;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:700;z-index:98;font-family:Plus Jakarta Sans,sans-serif;transition:opacity .3s';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = '1';
+  setTimeout(() => { if(el) el.style.opacity = '0'; }, 3000);
+}
+
+// ── MISE À JOUR BOUTIQUE SUR SERVEUR ──
+async function updateBoutiqueServeur() {
+  if (!boutiqueCode || !navigator.onLine) return;
+  const shop = getShop();
+  const secretQ = getSecretQ();
+  await supa.from('boutiques').update({
+    nom: shop.nom, ville: shop.ville, tel: shop.tel,
+    activite: shop.activite, adresse: shop.adresse, footer: shop.footer,
+    secret_question: secretQ.question, secret_reponse: secretQ.reponse
+  }).eq('code', boutiqueCode);
+}
+
+async function updatePinServeur(newPin) {
+  if (!boutiqueCode || !navigator.onLine) return;
+  await supa.from('boutiques').update({ pin: newPin }).eq('code', boutiqueCode);
+}
+
+
+</script>
+
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="StockCI Pro">
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+<link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjogIlN0b2NrQ0kgUHJvIiwgInNob3J0X25hbWUiOiAiU3RvY2tDSSIsICJkZXNjcmlwdGlvbiI6ICJHZXN0aW9uIGRlIHN0b2NrIHBvdXIgY29tbWVyY2VzIGl2b2lyaWVucyIsICJzdGFydF91cmwiOiAiLiIsICJzY29wZSI6ICIuIiwgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsICJiYWNrZ3JvdW5kX2NvbG9yIjogIiNGREY3RjIiLCAidGhlbWVfY29sb3IiOiAiI0M4NDIwQSIsICJvcmllbnRhdGlvbiI6ICJwb3J0cmFpdC1wcmltYXJ5IiwgImljb25zIjogW3sic3JjIjogImRhdGE6aW1hZ2Uvc3ZnK3htbDtiYXNlNjQsUEhOMlp5QjRiV3h1Y3owaWFIUjBjRG92TDNkM2R5NTNNeTV2Y21jdk1qQXdNQzl6ZG1jaUlIWnBaWGRDYjNnOUlqQWdNQ0F4TURBZ01UQXdJajQ4Y21WamRDQjNhV1IwYUQwaU1UQXdJaUJvWldsbmFIUTlJakV3TUNJZ2NuZzlJakl3SWlCbWFXeHNQU0lqUXpnME1qQkJJaTgrUEdOcGNtTnNaU0JqZUQwaU5UQWlJR041UFNJMU1DSWdjajBpTXpnaUlHWnBiR3c5SWlORk9EVTFNRVlpTHo0OGRHVjRkQ0I0UFNJMU1DSWdlVDBpTmpjaUlHWnZiblF0Wm1GdGFXeDVQU0pCY21saGJDQkNiR0ZqYXl4ellXNXpMWE5sY21sbUlpQm1iMjUwTFhOcGVtVTlJalV5SWlCbWIyNTBMWGRsYVdkb2REMGlPVEF3SWlCbWFXeHNQU0ozYUdsMFpTSWdkR1Y0ZEMxaGJtTm9iM0k5SW0xcFpHUnNaU0krVXp3dmRHVjRkRDQ4TDNOMlp6ND0iLCAic2l6ZXMiOiAiMTkyeDE5MiIsICJ0eXBlIjogImltYWdlL3N2Zyt4bWwiLCAicHVycG9zZSI6ICJhbnkifSwgeyJzcmMiOiAiZGF0YTppbWFnZS9zdmcreG1sO2Jhc2U2NCxQSE4yWnlCNGJXeHVjejBpYUhSMGNEb3ZMM2QzZHk1M015NXZjbWN2TWpBd01DOXpkbWNpSUhacFpYZENiM2c5SWpBZ01DQXhNREFnTVRBd0lqNDhjbVZqZENCM2FXUjBhRDBpTVRBd0lpQm9aV2xuYUhROUlqRXdNQ0lnY25nOUlqSXdJaUJtYVd4c1BTSWpRemcwTWpCQklpOCtQR05wY21Oc1pTQmplRDBpTlRBaUlHTjVQU0kxTUNJZ2NqMGlNemdpSUdacGJHdzlJaU5GT0RVMU1FWWlMejQ4ZEdWNGRDQjRQU0kxTUNJZ2VUMGlOamNpSUdadmJuUXRabUZ0YVd4NVBTSkJjbWxoYkNCQ2JHRmpheXh6WVc1ekxYTmxjbWxtSWlCbWIyNTBMWE5wZW1VOUlqVXlJaUJtYjI1MExYZGxhV2RvZEQwaU9UQXdJaUJtYVd4c1BTSjNhR2wwWlNJZ2RHVjRkQzFoYm1Ob2IzSTlJbTFwWkdSc1pTSStVend2ZEdWNGRENDhMM04yWno0PSIsICJzaXplcyI6ICI1MTJ4NTEyIiwgInR5cGUiOiAiaW1hZ2Uvc3ZnK3htbCIsICJwdXJwb3NlIjogImFueSBtYXNrYWJsZSJ9XX0=">
+<link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcng9IjIwIiBmaWxsPSIjQzg0MjBBIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSI1MCIgcj0iMzgiIGZpbGw9IiNFODU1MEYiLz48dGV4dCB4PSI1MCIgeT0iNjciIGZvbnQtZmFtaWx5PSJBcmlhbCBCbGFjayxzYW5zLXNlcmlmIiBmb250LXNpemU9IjUyIiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UzwvdGV4dD48L3N2Zz4=">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="StockCI Pro">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
 </head>
 <body>
+
+
+<!-- BANNIÈRE INSTALLATION PWA -->
+<div id="install-banner">
+  <div class="install-icon">📦</div>
+  <div class="install-text">
+    <div class="install-title">Installer StockCI Pro</div>
+    <div class="install-sub">Accès rapide · Fonctionne hors-ligne</div>
+  </div>
+  <button class="install-btn" onclick="installerApp()">Installer</button>
+  <button class="install-close" onclick="fermerBanniere()">✕</button>
+</div>
 
 <div class="toast-wrap" id="toast-wrap"></div>
 <div id="print-zone"></div>
@@ -343,15 +780,66 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
       <div class="form-group"><label class="form-label">Téléphone</label><input class="form-input" id="onb-tel" type="tel" placeholder="07 00 00 00 00"></div>
     </div>
     <div class="form-group"><label class="form-label">Activité (optionnel)</label><input class="form-input" id="onb-activite" placeholder="Ex: Matériaux de construction"></div>
-    <div class="form-group"><label class="form-label">Code PIN Patron (4 chiffres) *</label><input class="form-input" id="onb-pin" type="password" maxlength="4" inputmode="numeric" placeholder="1234"><div class="form-hint">Donne accès aux données financières confidentielles.</div></div>
-    <button class="btn btn-primary" onclick="finishOnboarding()" style="margin-top:8px">Commencer →</button>
+    <div class="form-group"><label class="form-label">N° Contribuable / NIF (optionnel)</label><input class="form-input" id="onb-nif" placeholder="Ex: 0012345678"><div class="form-hint">Pour les PME et entreprises formelles. Vous pouvez l'ajouter plus tard dans Réglages.</div></div>
+    <div class="form-group"><label class="form-label">Code PIN Patron (4 chiffres) *</label><input class="form-input" id="onb-pin" type="password" maxlength="10" inputmode="numeric" placeholder="Ex: 0707070707"><div class="form-hint">Donne accès aux données financières confidentielles.</div></div>
+    <div class="form-group">
+      <label class="form-label">Question secrète (si PIN oublié) *</label>
+      <select class="form-select" id="onb-question">
+        <option value="">-- Choisir une question --</option>
+        <option value="Nom de votre mère ?">Nom de votre mère ?</option>
+        <option value="Nom de votre village natal ?">Nom de votre village natal ?</option>
+        <option value="Nom de votre première école ?">Nom de votre première école ?</option>
+        <option value="Surnom d'enfance ?">Surnom d'enfance ?</option>
+        <option value="Nom de votre meilleur ami d'enfance ?">Nom de votre meilleur ami d'enfance ?</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Réponse secrète *</label>
+      <input class="form-input" id="onb-reponse" placeholder="Votre réponse (en minuscules)">
+      <div class="form-hint">Retenez bien cette réponse. Elle servira à récupérer votre PIN.</div>
+    </div>
+    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;background:var(--surface2);border-radius:var(--r-sm);padding:12px">
+      <input type="checkbox" id="onb-cgu" style="margin-top:3px;width:18px;height:18px;accent-color:var(--or);cursor:pointer">
+      <label for="onb-cgu" style="font-size:12px;color:var(--text2);line-height:1.5;cursor:pointer">
+        J'accepte les <span onclick="document.getElementById('page-cgu').style.display='block'" style="color:var(--or);font-weight:700;text-decoration:underline">Conditions générales</span> et la <span onclick="document.getElementById('page-cgu').style.display='block'" style="color:var(--or);font-weight:700;text-decoration:underline">Politique de confidentialité</span> de StockCI Pro.
+      </label>
+    </div>
+    <button class="btn btn-primary" onclick="finishOnboarding()" style="margin-top:8px">Créer ma boutique →</button>
+    <div style="text-align:center;margin-top:20px">
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">— ou —</div>
+      <button onclick="showConnexionExistante()" style="background:none;border:1.5px solid var(--or);color:var(--or);border-radius:var(--r-sm);padding:12px 20px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;width:100%">
+        📲 Connecter une boutique existante
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ÉCRAN CONNEXION BOUTIQUE EXISTANTE -->
+<div class="onboarding" id="connexion-existante" style="display:none">
+  <div class="onb-logo">🔑</div>
+  <div class="onb-title">Rejoindre une boutique</div>
+  <div class="onb-sub">Entrez votre code boutique et votre PIN pour accéder à vos données.</div>
+  <div class="onb-form">
+    <div class="form-group">
+      <label class="form-label">Code boutique *</label>
+      <input class="form-input" id="co-code" placeholder="Ex: ADJB1234" style="font-size:18px;font-weight:800;text-transform:uppercase;text-align:center;font-family:'JetBrains Mono',monospace" oninput="this.value=this.value.toUpperCase()">
+      <div class="form-hint">Ce code vous a été donné lors de la création de la boutique.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Code PIN Patron *</label>
+      <input class="form-input" id="co-pin" type="password" maxlength="10" inputmode="numeric" placeholder="4 à 10 chiffres">
+    </div>
+    <div style="color:var(--red);font-size:13px;font-weight:600;margin-bottom:12px;min-height:20px" id="co-error"></div>
+    <button class="btn btn-primary" onclick="connecterBoutiqueExistante()">Connecter →</button>
+    <br><br>
+    <button onclick="document.getElementById('connexion-existante').style.display='none';document.getElementById('onboarding').style.display='flex'" style="background:none;border:none;color:var(--text3);font-size:13px;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif">← Retour</button>
   </div>
 </div>
 
 <!-- ══════ TOPBAR ══════ -->
 <div class="topbar">
   <div class="logo">
-    <div class="logo-icon">📦</div>
+    <div class="logo-icon" onclick="handleLogoClick()" id="logo-icon" style="cursor:pointer">📦</div>
     <div class="logo-text">Stock<em>CI</em> <span style="font-size:11px;opacity:.45;vertical-align:middle">PRO</span></div>
   </div>
   <div class="topbar-actions">
@@ -389,7 +877,6 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
   </div>
   <div class="search-row">
     <div class="search-wrap"><span class="search-ico">🔍</span><input class="form-input" id="stock-search" placeholder="Rechercher..." oninput="renderStock()"></div>
-    <button class="btn-icon" onclick="openModal('modal-io')">⚙️</button>
   </div>
   <div class="filter-pills" id="stock-pills"></div>
   <div id="stock-list"></div>
@@ -533,10 +1020,35 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 <!-- PARAMÈTRES -->
 <div class="page" id="page-parametres">
   <div class="page-title">Paramètres</div>
+  <div class="card" id="code-boutique-card" style="display:none">
+    <div class="card-title" style="margin-bottom:10px">📲 Code de votre boutique</div>
+    <div style="background:var(--or-pale);border-radius:var(--r-sm);padding:14px;text-align:center;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Partagez ce code pour connecter un autre appareil</div>
+      <div id="display-code-boutique" style="font-size:28px;font-weight:800;letter-spacing:4px;color:var(--or);font-family:'JetBrains Mono',monospace"></div>
+    </div>
+    <button onclick="partagerCodeBoutique()" class="btn btn-ghost">📲 Partager le code par WhatsApp</button>
+  </div>
   <div class="card">
     <div class="card-title" style="margin-bottom:14px">🏪 Boutique</div>
     <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="s-nom"></div>
     <div class="form-group"><label class="form-label">Activité</label><input class="form-input" id="s-activite" placeholder="Ex: Matériaux de construction"></div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">N° Contribuable (NIF/CC)</label>
+        <input class="form-input" id="s-nif" placeholder="Ex: 0012345678">
+        <div class="form-hint">Numéro d'Identification Fiscale — apparaît sur les reçus PME</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Régime fiscal</label>
+        <select class="form-select" id="s-regime">
+          <option value="">Non renseigné</option>
+          <option value="RSI">RSI — Régime Simplifié</option>
+          <option value="RNI">RNI — Régime Normal</option>
+          <option value="Forfait">Forfait</option>
+          <option value="Exonéré">Exonéré / Informel</option>
+        </select>
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Ville</label><input class="form-input" id="s-ville"></div>
       <div class="form-group"><label class="form-label">Téléphone</label><input class="form-input" id="s-tel" type="tel"></div>
@@ -546,12 +1058,29 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
     <button class="btn btn-primary" onclick="saveShop()">💾 Enregistrer</button>
   </div>
   <div class="card" id="patron-pin-card" style="display:none">
-    <div class="card-title" style="margin-bottom:14px">🔐 Code PIN Patron</div>
+    <div class="card-title" style="margin-bottom:14px">🔐 Sécurité Patron</div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Nouveau PIN</label><input class="form-input" id="s-pin" type="password" maxlength="4" inputmode="numeric" placeholder="4 chiffres"></div>
-      <div class="form-group"><label class="form-label">Confirmer</label><input class="form-input" id="s-pin2" type="password" maxlength="4" inputmode="numeric" placeholder="Répéter"></div>
+      <div class="form-group"><label class="form-label">Nouveau PIN</label><input class="form-input" id="s-pin" type="password" maxlength="10" inputmode="numeric" placeholder="4 à 10 chiffres"></div>
+      <div class="form-group"><label class="form-label">Confirmer</label><input class="form-input" id="s-pin2" type="password" maxlength="10" inputmode="numeric" placeholder="Répéter"></div>
     </div>
-    <button class="btn btn-primary" onclick="savePin()">🔐 Mettre à jour le PIN</button>
+    <button class="btn btn-primary" onclick="savePin()" style="margin-bottom:12px">🔐 Mettre à jour le PIN</button>
+    <hr style="border:none;border-top:1px solid var(--border);margin:14px 0">
+    <div class="form-group">
+      <label class="form-label">Modifier la question secrète</label>
+      <select class="form-select" id="s-question">
+        <option value="">-- Choisir une question --</option>
+        <option value="Nom de votre mère ?">Nom de votre mère ?</option>
+        <option value="Nom de votre village natal ?">Nom de votre village natal ?</option>
+        <option value="Nom de votre première école ?">Nom de votre première école ?</option>
+        <option value="Surnom d'enfance ?">Surnom d'enfance ?</option>
+        <option value="Nom de votre meilleur ami d'enfance ?">Nom de votre meilleur ami d'enfance ?</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nouvelle réponse secrète</label>
+      <input class="form-input" id="s-reponse" placeholder="En minuscules">
+    </div>
+    <button class="btn btn-ghost" onclick="saveQuestionSecrete()">💾 Mettre à jour la question secrète</button>
   </div>
   <div class="card">
     <div class="card-title" style="margin-bottom:14px">⚙️ Préférences</div>
@@ -560,12 +1089,19 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
       <button class="toggle" id="tog-dark" onclick="toggleTheme()"></button>
     </div>
   </div>
-  <div class="card">
-    <div class="card-title" style="margin-bottom:14px">💾 Données</div>
-    <button class="btn btn-ghost" onclick="exportData()" style="margin-bottom:10px">📤 Exporter (JSON)</button>
-    <button class="btn btn-ghost" onclick="document.getElementById('imp-f').click()" style="margin-bottom:10px">📥 Importer (JSON)</button>
+  <div class="card" id="data-card-patron" style="display:none">
+    <div class="card-title" style="margin-bottom:6px">💾 Données <span style="font-size:10px;font-weight:600;color:var(--purple);background:var(--purple-pale);padding:2px 8px;border-radius:20px;margin-left:6px">🔐 Patron</span></div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:14px;line-height:1.5">Sauvegarde de secours. Utile uniquement en cas de problème serveur.</div>
+    <button class="btn btn-ghost" onclick="exportData()" style="margin-bottom:10px">📤 Exporter sauvegarde (JSON)</button>
+    <button class="btn btn-ghost" onclick="document.getElementById('imp-f').click()" style="margin-bottom:10px">📥 Restaurer depuis sauvegarde</button>
     <input type="file" id="imp-f" accept=".json" style="display:none" onchange="importData(event)">
+    <hr style="border:none;border-top:1px solid var(--border);margin:10px 0">
     <button class="btn btn-danger btn-sm" style="width:100%" onclick="resetAll()">🗑️ Réinitialiser toutes les données</button>
+  </div>
+  <div class="card">
+    <div class="card-title" style="margin-bottom:12px">📋 Informations légales</div>
+    <button onclick="document.getElementById('page-cgu').style.display='block'" class="btn btn-ghost" style="margin-bottom:10px">📋 Conditions générales d'utilisation</button>
+    <button onclick="document.getElementById('page-cgu').style.display='block'" class="btn btn-ghost">🔒 Politique de confidentialité</button>
   </div>
 </div>
 
@@ -606,7 +1142,7 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Prix de vente (FCFA) *</label><input class="form-input" id="p-prix" type="number" placeholder="0" min="0"></div>
-      <div class="form-group" id="achat-field"><label class="form-label">Prix d'achat <span style="font-size:10px;color:var(--purple)">🔐</span></label><input class="form-input" id="p-achat" type="number" placeholder="0" min="0"></div>
+      <div class="form-group" id="achat-field"><label class="form-label">Prix de revient / achat (FCFA)</label><input class="form-input" id="p-achat" type="number" placeholder="0" min="0"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Quantité *</label><input class="form-input" id="p-qty" type="number" placeholder="0" min="0"></div>
@@ -708,9 +1244,8 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
     <div class="modal-handle"></div>
     <div class="modal-title" id="pin-title" style="text-align:center">🔐 Code Patron</div>
     <p style="text-align:center;font-size:13px;color:var(--text2);margin-bottom:8px" id="pin-subtitle">Entrez votre code PIN</p>
-    <div class="pin-dots" id="pin-dots">
-      <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
-      <div class="pin-dot" id="pd2"></div><div class="pin-dot" id="pd3"></div>
+    <div id="pin-input-display" style="text-align:center;font-size:24px;letter-spacing:8px;color:var(--or);font-family:'JetBrains Mono',monospace;min-height:36px;margin:16px 0 8px">
+      <span id="pin-stars">——</span>
     </div>
     <div class="pin-error" id="pin-error"></div>
     <div class="pin-pad">
@@ -718,6 +1253,9 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
       <button class="pin-key" onclick="pinKey('4')">4</button><button class="pin-key" onclick="pinKey('5')">5</button><button class="pin-key" onclick="pinKey('6')">6</button>
       <button class="pin-key" onclick="pinKey('7')">7</button><button class="pin-key" onclick="pinKey('8')">8</button><button class="pin-key" onclick="pinKey('9')">9</button>
       <button class="pin-key" onclick="pinDel()">⌫</button><button class="pin-key zero" onclick="pinKey('0')">0</button><button class="pin-key" onclick="closeModal('modal-pin');pinBuffer=''">✕</button>
+    </div>
+    <div style="text-align:center;margin-top:4px">
+      <button onclick="openPinOublie()" style="background:none;border:none;color:var(--or);font-size:13px;font-weight:600;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;text-decoration:underline">PIN oublié ?</button>
     </div>
   </div>
 </div>
@@ -853,14 +1391,43 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
     </div>
   </div>
 </div>
+<!-- MODAL: PIN oublié -->
+<div class="overlay" id="modal-pin-oublie">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
-    <button class="modal-close" onclick="closeModal('modal-io')">✕</button>
-    <div class="modal-title">Import / Export</div>
-    <p style="font-size:13px;color:var(--text2);margin-bottom:20px;line-height:1.6">Sauvegardez ou transférez vos données sur un autre appareil.</p>
-    <button class="btn btn-primary" onclick="exportData();closeModal('modal-io')" style="margin-bottom:12px">📤 Exporter tout (JSON)</button>
-    <button class="btn btn-ghost" onclick="document.getElementById('imp-f2').click()">📥 Importer (JSON)</button>
-    <input type="file" id="imp-f2" accept=".json" style="display:none" onchange="importData(event)">
+    <button class="modal-close" onclick="closeModal('modal-pin-oublie')">✕</button>
+    <div class="modal-title">🔑 Récupérer mon PIN</div>
+    <div id="po-etape1">
+      <div style="background:var(--or-pale);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--or);margin-bottom:4px">Question secrète</div>
+        <div style="font-size:15px;font-weight:700" id="po-question-txt"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Votre réponse</label>
+        <input class="form-input" id="po-reponse" placeholder="Entrez votre réponse..." autocomplete="off">
+      </div>
+      <div style="color:var(--red);font-size:13px;font-weight:600;margin-bottom:12px;min-height:20px" id="po-error"></div>
+      <button class="btn btn-primary" onclick="verifierReponseSecrete()">Vérifier →</button>
+      <br><br>
+      <button class="btn btn-ghost" onclick="closeModal('modal-pin-oublie')">Annuler</button>
+    </div>
+    <div id="po-etape2" style="display:none">
+      <div style="background:var(--green-pale);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:16px;text-align:center">
+        <div style="font-size:14px;font-weight:700;color:var(--green)">✅ Réponse correcte !</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:4px">Définissez votre nouveau PIN</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Nouveau PIN *</label>
+          <input class="form-input" id="po-nouveau-pin" type="password" maxlength="10" inputmode="numeric" placeholder="4 à 10 chiffres">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirmer *</label>
+          <input class="form-input" id="po-nouveau-pin2" type="password" maxlength="10" inputmode="numeric" placeholder="Répéter">
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="resetPinAvecQuestion()">🔐 Enregistrer le nouveau PIN</button>
+    </div>
   </div>
 </div>
 
@@ -868,6 +1435,106 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
      JAVASCRIPT
 ═══════════════════════════════════ -->
 <script>
+
+
+// ── INSTALLATION PWA ──
+let deferredPrompt = null;
+
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Afficher la bannière après 2 secondes si pas encore installé
+  if (!localStorage.getItem('pwa_installed')) {
+    setTimeout(function() {
+      document.getElementById('install-banner').style.display = 'flex';
+    }, 2000);
+  }
+});
+
+window.addEventListener('appinstalled', function() {
+  localStorage.setItem('pwa_installed', '1');
+  document.getElementById('install-banner').style.display = 'none';
+  deferredPrompt = null;
+  toast('✅ Application installée avec succès !', 'success');
+});
+
+function installerApp() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(function(result) {
+      if (result.outcome === 'accepted') {
+        localStorage.setItem('pwa_installed', '1');
+      }
+      deferredPrompt = null;
+      document.getElementById('install-banner').style.display = 'none';
+    });
+  } else {
+    // Fallback pour iOS ou si prompt pas dispo
+    toast('Appuyez sur ⋮ → "Ajouter à l'écran d'accueil"', '');
+    fermerBanniere();
+  }
+}
+
+function fermerBanniere() {
+  document.getElementById('install-banner').style.display = 'none';
+  // Ne plus montrer pendant 3 jours
+  localStorage.setItem('pwa_banner_dismissed', Date.now().toString());
+}
+
+// Vérifier si on doit afficher la bannière (pas refusée récemment)
+window.addEventListener('load', function() {
+  var dismissed = localStorage.getItem('pwa_banner_dismissed');
+  if (dismissed) {
+    var threeDays = 3 * 24 * 60 * 60 * 1000;
+    if (Date.now() - parseInt(dismissed) < threeDays) {
+      // Ne pas afficher — refusée récemment
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        deferredPrompt = e;
+      });
+      return;
+    }
+  }
+});
+
+// ── DÉSINSTALLER SW AU DÉMARRAGE ──
+(function(){
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.getRegistrations().then(function(regs){
+      regs.forEach(function(r){ r.unregister(); });
+    });
+  }
+  if('caches' in window){
+    caches.keys().then(function(names){
+      names.forEach(function(n){ caches.delete(n); });
+    });
+  }
+})();
+
+// ── RESET FORCÉ VIA URL ──
+(function(){
+  if(window.location.search.includes('reset')){
+    var keys = ['sci_prod','sci_vent','sci_shop','sci_set','sci_ctr','sci_pin','sci_secretq',
+                'sci_credits','sci_fourns','sci_devis','sci_depenses','sci_dvctr','sci_mouvs',
+                'sci_boutique_code','sci_last_push','sci_last_pull'];
+    keys.forEach(function(k){ localStorage.removeItem(k); });
+    // Supprimer tous les service workers
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.getRegistrations().then(function(regs){
+        regs.forEach(function(r){ r.unregister(); });
+      });
+    }
+    // Vider tous les caches
+    if('caches' in window){
+      caches.keys().then(function(names){
+        names.forEach(function(n){ caches.delete(n); });
+      });
+    }
+    window.location.href = window.location.pathname;
+    return;
+  }
+})();
+
 // ── NAVIGATION ÉTENDUE ──
 const ALL_PAGES = ['accueil','stock','vente','plus','historique','credits','fournisseurs','devis','depenses','rapport','parametres'];
 
@@ -904,6 +1571,8 @@ const getCounter   = () => S.get('sci_ctr')   || 1;
 const setCounter   = v  => S.set('sci_ctr', v);
 const getPin       = () => S.get('sci_pin')   || '0000';
 const setPin       = v  => S.set('sci_pin', v);
+const getSecretQ   = () => S.get('sci_secretq') || {question:'', reponse:''};
+const setSecretQ   = v  => S.set('sci_secretq', v);
 
 // ── STATE ──
 let cart = {}, currentVente = null, currentHist = null, isPatron = false;
@@ -911,26 +1580,270 @@ let stockFilter = 'all', venteFilter = 'all';
 let pinBuffer = '', pinCallback = null;
 let selectedPaiement = 'Espèces';
 
+// ── CONNEXION BOUTIQUE EXISTANTE ──
+function showConnexionExistante() {
+  document.getElementById('onboarding').style.display = 'none';
+  document.getElementById('connexion-existante').style.display = 'flex';
+}
+
+async function connecterBoutiqueExistante() {
+  const code = document.getElementById('co-code').value.trim().toUpperCase();
+  const pin = document.getElementById('co-pin').value.trim();
+  const errEl = document.getElementById('co-error');
+  if (!code) { errEl.textContent = 'Entrez le code boutique'; return; }
+  if (!/^\d{4}$/.test(pin)) { errEl.textContent = 'PIN = 4 chiffres'; return; }
+  errEl.textContent = '';
+
+  const result = await connecterBoutique(code, pin);
+  if (result.success) {
+    const b = result.boutique;
+    setPin(b.pin);
+    setShop({
+      nom: b.nom, ville: b.ville||'', tel: b.tel||'',
+      activite: b.activite||'', adresse: b.adresse||'',
+      footer: b.footer||'Merci pour votre confiance !',
+      nif: b.nif||'', regime: b.regime||''
+    });
+    document.getElementById('connexion-existante').style.display = 'none';
+    document.getElementById('onboarding').style.display = 'none';
+    startApp();
+    toast('✅ Boutique connectée ! Bienvenue.', 'success');
+  } else {
+    if (btn) { btn.textContent = 'Connecter →'; btn.disabled = false; }
+    errEl.textContent = '❌ ' + result.error;
+  }
+}
+
+
+// ════════════════════════════
+// TABLEAU DE BORD ADMIN
+// ════════════════════════════
+const ADMIN_CODE = 'STOCKCI2026ADMIN';
+let adminBoutiques = [];
+let currentAdminBoutique = null;
+let logoClickCount = 0;
+let logoClickTimer = null;
+
+function handleLogoClick() {
+  logoClickCount++;
+  clearTimeout(logoClickTimer);
+  logoClickTimer = setTimeout(() => { logoClickCount = 0; }, 2000);
+  if (logoClickCount >= 5) {
+    logoClickCount = 0;
+    document.getElementById('admin-code-input').value = '';
+    document.getElementById('admin-login-error').textContent = '';
+    openModal('modal-admin-login');
+  }
+}
+
+function verifierAdmin() {
+  const code = document.getElementById('admin-code-input').value.trim();
+  if (code === ADMIN_CODE) {
+    closeModal('modal-admin-login');
+    ouvrirAdmin();
+  } else {
+    document.getElementById('admin-login-error').textContent = '❌ Code incorrect';
+  }
+}
+
+async function ouvrirAdmin() {
+  document.getElementById('page-admin').style.display = 'block';
+  document.getElementById('admin-boutiques-list').innerHTML = '<div class="empty-state"><div class="empty-ico">⏳</div><div class="empty-title">Chargement...</div></div>';
+  try {
+    const { data, error } = await supa.from('boutiques').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    adminBoutiques = data || [];
+    renderAdminStats();
+    renderAdminBoutiques(adminBoutiques);
+  } catch(e) {
+    document.getElementById('admin-boutiques-list').innerHTML = '<div class="empty-state"><div class="empty-ico">❌</div><div class="empty-title">Erreur de connexion</div></div>';
+  }
+}
+
+function closeAdmin() {
+  document.getElementById('page-admin').style.display = 'none';
+}
+
+function renderAdminStats() {
+  const total = adminBoutiques.length;
+  const actives = adminBoutiques.filter(b => b.actif !== false).length;
+  const suspendues = adminBoutiques.filter(b => b.actif === false).length;
+  document.getElementById('admin-stats').innerHTML = `
+    <div style="background:var(--surface);border-radius:var(--r);padding:14px;text-align:center;border:1px solid var(--border)">
+      <div style="font-size:22px;font-weight:800;color:var(--or)">${total}</div>
+      <div style="font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase">Total</div>
+    </div>
+    <div style="background:var(--surface);border-radius:var(--r);padding:14px;text-align:center;border:1px solid var(--green)">
+      <div style="font-size:22px;font-weight:800;color:var(--green)">${actives}</div>
+      <div style="font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase">Actives</div>
+    </div>
+    <div style="background:var(--surface);border-radius:var(--r);padding:14px;text-align:center;border:1px solid var(--red)">
+      <div style="font-size:22px;font-weight:800;color:var(--red)">${suspendues}</div>
+      <div style="font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase">Suspendues</div>
+    </div>`;
+}
+
+function renderAdminBoutiques(list) {
+  const el = document.getElementById('admin-boutiques-list');
+  if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="empty-ico">🏪</div><div class="empty-title">Aucune boutique</div></div>'; return; }
+  el.innerHTML = list.map(b => {
+    const actif = b.actif !== false;
+    const expire = b.date_expiration ? new Date(b.date_expiration) : null;
+    const expireStr = expire ? expire.toLocaleDateString('fr-FR') : 'Aucune';
+    const expired = expire && expire < new Date();
+    return `<div style="background:var(--surface);border:1.5px solid ${actif?'var(--border)':'var(--red)'};border-radius:var(--r);padding:14px;margin-bottom:10px;cursor:pointer" onclick="ouvrirDetailBoutique('${b.code}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="flex:1">
+          <div style="font-size:15px;font-weight:800">${b.nom}</div>
+          <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--or);font-weight:700">${b.code}</div>
+          ${b.ville?`<div style="font-size:12px;color:var(--text3)">📍 ${b.ville}</div>`:''}
+          ${b.tel?`<div style="font-size:12px;color:var(--text3)">📞 ${b.tel}</div>`:''}
+        </div>
+        <div style="text-align:right;flex-shrink:0;margin-left:10px">
+          <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;${actif?'background:var(--green-pale);color:var(--green)':'background:var(--red-pale);color:var(--red)'}">${actif?'✅ Active':'🚫 Suspendue'}</span>
+          ${b.plan&&b.plan!=='gratuit'?`<div style="font-size:10px;font-weight:700;color:var(--blue);margin-top:4px">${b.plan}</div>`:''}
+          ${expire?`<div style="font-size:10px;color:${expired?'var(--red)':'var(--text3)'};margin-top:4px">${expired?'⚠️ Expiré':'Expire'}: ${expireStr}</div>`:''}
+        </div>
+      </div>
+      ${b.note_admin?`<div style="font-size:11px;color:var(--yellow);background:var(--yellow-pale);border-radius:6px;padding:4px 8px;margin-top:8px">📝 ${b.note_admin}</div>`:''}
+      <div style="font-size:10px;color:var(--text3);margin-top:6px">Créé le ${new Date(b.created_at).toLocaleDateString('fr-FR')}</div>
+    </div>`;
+  }).join('');
+}
+
+function filterBoutiques() {
+  const q = document.getElementById('admin-search').value.toLowerCase();
+  const filtered = adminBoutiques.filter(b =>
+    b.nom.toLowerCase().includes(q) ||
+    b.code.toLowerCase().includes(q) ||
+    (b.ville||'').toLowerCase().includes(q) ||
+    (b.tel||'').includes(q)
+  );
+  renderAdminBoutiques(filtered);
+}
+
+function ouvrirDetailBoutique(code) {
+  const b = adminBoutiques.find(x => x.code === code);
+  if (!b) return;
+  currentAdminBoutique = b;
+  const actif = b.actif !== false;
+  document.getElementById('ab-titre').textContent = b.nom;
+  document.getElementById('ab-expiration').value = b.date_expiration || '';
+  document.getElementById('ab-plan').value = b.plan || 'gratuit';
+  document.getElementById('ab-note').value = b.note_admin || '';
+  document.getElementById('ab-btn-statut').textContent = actif ? '🚫 Suspendre cette boutique' : '✅ Réactiver cette boutique';
+  document.getElementById('ab-btn-statut').className = actif ? 'btn btn-danger' : 'btn btn-green';
+  document.getElementById('ab-infos').innerHTML = `
+    <div style="background:var(--surface2);border-radius:var(--r-sm);padding:12px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px;border-bottom:1px solid var(--border)"><span>Code</span><strong style="font-family:'JetBrains Mono',monospace;color:var(--or)">${b.code}</strong></div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px;border-bottom:1px solid var(--border)"><span>Téléphone</span><span>${b.tel||'—'}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px;border-bottom:1px solid var(--border)"><span>Ville</span><span>${b.ville||'—'}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px"><span>Créé le</span><span>${new Date(b.created_at).toLocaleDateString('fr-FR')}</span></div>
+    </div>`;
+  openModal('modal-admin-boutique');
+}
+
+async function toggleStatutBoutique() {
+  if (!currentAdminBoutique) return;
+  const actif = currentAdminBoutique.actif !== false;
+  const newStatut = !actif;
+  const msg = newStatut ? 'Réactiver cette boutique ?' : 'Suspendre cette boutique ? Le client ne pourra plus se connecter.';
+  if (!confirm(msg)) return;
+  try {
+    const { error } = await supa.from('boutiques').update({ actif: newStatut }).eq('code', currentAdminBoutique.code);
+    if (error) throw error;
+    currentAdminBoutique.actif = newStatut;
+    const idx = adminBoutiques.findIndex(x => x.code === currentAdminBoutique.code);
+    if (idx >= 0) adminBoutiques[idx].actif = newStatut;
+    closeModal('modal-admin-boutique');
+    renderAdminStats();
+    renderAdminBoutiques(adminBoutiques);
+    toast(newStatut ? '✅ Boutique réactivée' : '🚫 Boutique suspendue', newStatut ? 'success' : 'error');
+  } catch(e) {
+    toast('Erreur: ' + e.message, 'error');
+  }
+}
+
+async function sauvegarderAdmin() {
+  if (!currentAdminBoutique) return;
+  const updates = {
+    date_expiration: document.getElementById('ab-expiration').value || null,
+    plan: document.getElementById('ab-plan').value,
+    note_admin: document.getElementById('ab-note').value.trim()
+  };
+  try {
+    const { error } = await supa.from('boutiques').update(updates).eq('code', currentAdminBoutique.code);
+    if (error) throw error;
+    Object.assign(currentAdminBoutique, updates);
+    const idx = adminBoutiques.findIndex(x => x.code === currentAdminBoutique.code);
+    if (idx >= 0) Object.assign(adminBoutiques[idx], updates);
+    closeModal('modal-admin-boutique');
+    renderAdminBoutiques(adminBoutiques);
+    toast('Sauvegardé ✅', 'success');
+  } catch(e) {
+    toast('Erreur: ' + e.message, 'error');
+  }
+}
+
+async function supprimerBoutique() {
+  if (!currentAdminBoutique) return;
+  if (!confirm('⚠️ Supprimer "' + currentAdminBoutique.nom + '" définitivement ? Toutes les données seront perdues.')) return;
+  if (!confirm('Dernière confirmation — cette action est IRRÉVERSIBLE.')) return;
+  try {
+    const { error } = await supa.from('boutiques').delete().eq('code', currentAdminBoutique.code);
+    if (error) throw error;
+    adminBoutiques = adminBoutiques.filter(x => x.code !== currentAdminBoutique.code);
+    closeModal('modal-admin-boutique');
+    renderAdminStats();
+    renderAdminBoutiques(adminBoutiques);
+    toast('Boutique supprimée', '');
+  } catch(e) {
+    toast('Erreur: ' + e.message, 'error');
+  }
+}
+
 // ── INIT ──
 function init() {
-  if (!S.get('sci_shop')) { document.getElementById('onboarding').style.display = 'flex'; return; }
-  startApp();
+  applyTheme();
+  document.getElementById('onboarding').style.display = 'flex';
+  document.getElementById('connexion-existante').style.display = 'none';
 }
 
 function startApp() {
   applyTheme();
   updateModeBadge();
   renderAccueil();
+  renderStock();
   loadSettingsPage();
+  // Sync auto toutes les 30 secondes
+  if (boutiqueCode) {
+    startAutoSync();
+  }
 }
 
-function finishOnboarding() {
+async function finishOnboarding() {
   const nom = document.getElementById('onb-nom').value.trim();
   const pin = document.getElementById('onb-pin').value.trim();
+  const question = document.getElementById('onb-question').value;
+  const reponse = document.getElementById('onb-reponse').value.trim().toLowerCase();
+  if (!document.getElementById('onb-cgu').checked) { toast('Veuillez accepter les conditions générales', 'error'); return; }
   if (!nom) { toast('Entrez le nom de votre boutique', 'error'); return; }
   if (!/^\d{4}$/.test(pin)) { toast('Le PIN doit être exactement 4 chiffres', 'error'); return; }
-  setShop({ nom, ville:document.getElementById('onb-ville').value.trim(), tel:document.getElementById('onb-tel').value.trim(), activite:document.getElementById('onb-activite').value.trim(), adresse:'', footer:'Merci pour votre confiance !' });
+  if (!question) { toast('Choisissez une question secrète', 'error'); return; }
+  if (!reponse) { toast('Entrez la réponse secrète', 'error'); return; }
+  const shopData = { nom, ville:document.getElementById('onb-ville').value.trim(), tel:document.getElementById('onb-tel').value.trim(), activite:document.getElementById('onb-activite').value.trim(), adresse:'', footer:'Merci pour votre confiance !', nif:document.getElementById('onb-nif').value.trim(), regime:'' };
+  setShop(shopData);
   setPin(pin);
+  setSecretQ({ question, reponse });
+  // Créer sur Supabase
+  const result = await inscrireBoutique(shopData, pin, {question, reponse});
+  if (result.success) {
+    toast('Boutique créée ! Code: ' + result.code, 'success');
+    localStorage.setItem('sci_boutique_code', result.code);
+    boutiqueCode = result.code;
+  } else {
+    toast('Mode hors-ligne — données sauvegardées localement', '');
+  }
   setProducts([
     {id:'d1',nom:'Ciment Portland 50kg',cat:'Ciment',unite:'sac',prix:6000,achat:4800,qty:50,seuil:10,ref:''},
     {id:'d2',nom:'Barre fer HA12 x 6m',cat:'Ferraille',unite:'barre',prix:8500,achat:6800,qty:18,seuil:5,ref:''},
@@ -966,10 +1879,11 @@ function requestPin(title,subtitle,cb) {
   updatePinDots(); openModal('modal-pin');
 }
 function pinKey(k) {
-  if (pinBuffer.length>=4) return;
+  if (pinBuffer.length>=10) return;
   pinBuffer+=k; updatePinDots();
   document.getElementById('pin-error').textContent='';
-  if (pinBuffer.length===4) {
+  const pinLen = getPin().length;
+  if (pinBuffer.length===pinLen) {
     setTimeout(()=>{
       if (pinBuffer===getPin()) { closeModal('modal-pin'); pinBuffer=''; updatePinDots(); if(pinCallback) pinCallback(); pinCallback=null; }
       else { document.getElementById('pin-error').textContent='❌ Code incorrect'; pinBuffer=''; updatePinDots(); }
@@ -977,7 +1891,54 @@ function pinKey(k) {
   }
 }
 function pinDel() { pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); document.getElementById('pin-error').textContent=''; }
-function updatePinDots() { for(let i=0;i<4;i++) document.getElementById('pd'+i).className='pin-dot'+(i<pinBuffer.length?' filled':''); }
+function updatePinDots() {
+  const stars = document.getElementById('pin-stars');
+  if(stars) {
+    if(pinBuffer.length === 0) { stars.textContent = '——'; return; }
+    stars.textContent = '●'.repeat(pinBuffer.length);
+  }
+}
+
+// ── PIN OUBLIÉ ──
+function openPinOublie() {
+  const sq = getSecretQ();
+  if (!sq.question) {
+    toast('Aucune question secrète configurée. Contactez le support.', 'error');
+    return;
+  }
+  document.getElementById('po-question-txt').textContent = sq.question;
+  document.getElementById('po-reponse').value = '';
+  document.getElementById('po-error').textContent = '';
+  document.getElementById('po-etape1').style.display = 'block';
+  document.getElementById('po-etape2').style.display = 'none';
+  closeModal('modal-pin');
+  openModal('modal-pin-oublie');
+}
+
+function verifierReponseSecrete() {
+  const sq = getSecretQ();
+  const rep = document.getElementById('po-reponse').value.trim().toLowerCase();
+  if (!rep) { document.getElementById('po-error').textContent = 'Entrez votre réponse'; return; }
+  if (rep === sq.reponse) {
+    document.getElementById('po-etape1').style.display = 'none';
+    document.getElementById('po-etape2').style.display = 'block';
+    document.getElementById('po-nouveau-pin').value = '';
+    document.getElementById('po-nouveau-pin2').value = '';
+  } else {
+    document.getElementById('po-error').textContent = '❌ Réponse incorrecte. Réessayez.';
+    document.getElementById('po-reponse').value = '';
+  }
+}
+
+function resetPinAvecQuestion() {
+  const p1 = document.getElementById('po-nouveau-pin').value.trim();
+  const p2 = document.getElementById('po-nouveau-pin2').value.trim();
+  if (!/^\d{4}$/.test(p1)) { toast('PIN = 4 chiffres obligatoires', 'error'); return; }
+  if (p1 !== p2) { toast('Les deux PIN ne correspondent pas', 'error'); return; }
+  setPin(p1);
+  closeModal('modal-pin-oublie');
+  toast('✅ Nouveau PIN enregistré ! Vous pouvez vous connecter.', 'success');
+}
 
 // ── NAVIGATION ──
 function showPage(name) {
@@ -1075,7 +2036,7 @@ function openAddProduct() {
   ['p-nom','p-cat','p-unite','p-prix','p-achat','p-qty','p-ref'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('p-seuil').value='5';document.getElementById('p-id').value='';
   document.getElementById('mp-title').textContent='Nouveau produit';
-  document.getElementById('achat-field').style.display=isPatron?'':'none';
+  document.getElementById('achat-field').style.display='';
   openModal('modal-product');
 }
 
@@ -1086,7 +2047,7 @@ function editProduct(id) {
   document.getElementById('p-achat').value=p.achat||'';document.getElementById('p-qty').value=p.qty;
   document.getElementById('p-seuil').value=p.seuil||5;document.getElementById('p-ref').value=p.ref||'';
   document.getElementById('p-id').value=id;document.getElementById('mp-title').textContent='Modifier le produit';
-  document.getElementById('achat-field').style.display=isPatron?'':'none';
+  document.getElementById('achat-field').style.display='';
   openModal('modal-product');
 }
 
@@ -1094,7 +2055,7 @@ function saveProduct() {
   const nom=document.getElementById('p-nom').value.trim(),prix=parseFloat(document.getElementById('p-prix').value),qty=parseFloat(document.getElementById('p-qty').value);
   if(!nom){toast('Nom obligatoire','error');return;}if(isNaN(prix)||prix<0){toast('Prix obligatoire','error');return;}if(isNaN(qty)||qty<0){toast('Quantité obligatoire','error');return;}
   const prods=getProducts(),id=document.getElementById('p-id').value;
-  const prod={id:id||Date.now().toString(),nom,cat:document.getElementById('p-cat').value.trim(),unite:document.getElementById('p-unite').value.trim()||'unité',prix,achat:isPatron?parseFloat(document.getElementById('p-achat').value)||0:(id?getProducts().find(x=>x.id===id)?.achat||0:0),qty,seuil:parseFloat(document.getElementById('p-seuil').value)||5,ref:document.getElementById('p-ref').value.trim()};
+  const prod={id:id||Date.now().toString(),nom,cat:document.getElementById('p-cat').value.trim(),unite:document.getElementById('p-unite').value.trim()||'unité',prix,achat:parseFloat(document.getElementById('p-achat').value)||0,qty,seuil:parseFloat(document.getElementById('p-seuil').value)||5,ref:document.getElementById('p-ref').value.trim()};
   if(id){const i=prods.findIndex(x=>x.id===id);prods[i]=prod;addStockMouvement('modif',prod.nom,`Modifié · Prix: ${fmoney(prod.prix)} F · Stock: ${prod.qty} ${prod.unite}`);}
   else{prods.unshift(prod);addStockMouvement('ajout',prod.nom,`Ajouté · Prix: ${fmoney(prod.prix)} F · Stock initial: ${prod.qty} ${prod.unite}`);}
   setProducts(prods);closeModal('modal-product');renderStock();renderAccueil();toast(id?'Produit mis à jour ✅':'Produit ajouté ✅','success');
@@ -1123,7 +2084,12 @@ function renderVente() {
     return`<div class="vente-card ${qty>0?'in-cart':''}">
       <div class="vente-info" style="flex:1;min-width:0">
         <div class="vente-name">${p.nom}</div>
-        <div class="vente-meta" style="margin-bottom:${qty>0?'8px':'0'}">${fmoney(p.prix)} FCFA / ${p.unite} · Stock: ${p.qty}</div>
+        <div class="vente-meta" style="margin-bottom:4px">${fmoney(p.prix)} FCFA / ${p.unite} · Stock: ${p.qty}</div>
+        <div style="display:inline-flex;align-items:center;gap:4px;background:var(--blue-pale);border-radius:6px;padding:3px 8px;margin-bottom:${qty>0?'6px':'2px'}">
+          <span style="font-size:10px;font-weight:700;color:var(--blue)">Revient:</span>
+          <span style="font-size:11px;font-weight:800;color:var(--blue);font-family:'JetBrains Mono',monospace">${p.achat>0?fmoney(p.achat)+' F':'Non renseigné'}</span>
+          ${p.achat>0?`<span style="font-size:10px;color:var(--blue);opacity:.7">/ ${p.unite}</span>`:''}
+        </div>
         ${qty>0?`
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <div style="display:flex;align-items:center;gap:6px;background:${prixModifie?'var(--yellow-pale)':'var(--or-pale)'};border:1.5px solid ${prixModifie?'var(--yellow)':'var(--or)'};border-radius:8px;padding:5px 10px">
@@ -1140,7 +2106,8 @@ function renderVente() {
           </div>
           ${prixModifie?`<span style="font-size:10px;color:var(--text3);text-decoration:line-through">${fmoney(p.prix)} F</span><span style="font-size:10px;font-weight:700;color:var(--yellow)">Prix modifié</span>`:''}
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">Sous-total: <strong style="color:var(--or)">${fmoney(prixV*qty)} FCFA</strong></div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Sous-total: <strong style="color:var(--or)">${fmoney(prixV*qty)} FCFA</strong>${p.achat>0?` · <span style="color:var(--blue)">Marge: ${fmoney((prixV-p.achat)*qty)} F</span>`:''}
+        </div>
         `:''}
       </div>
       <div class="qty-ctrl" style="flex-shrink:0;margin-left:8px">
@@ -1226,6 +2193,7 @@ function validateSale() {
   document.getElementById('recu-display').innerHTML=buildRecuHTML(vente);
   openModal('modal-recu');
   renderAccueil();
+  pushToServer();
 }
 
 function resetCart(){cart={};renderVente();}
@@ -1242,6 +2210,7 @@ function buildRecuHTML(v) {
       <div style="text-align:center;font-family:'Plus Jakarta Sans',sans-serif;font-size:17px;font-weight:800;color:#2C1A0E">${shop.nom}</div>
       ${shop.activite?`<div style="text-align:center;font-size:10px;font-weight:600;color:#9A8A7E;text-transform:uppercase;letter-spacing:.6px;margin-top:2px">${shop.activite}</div>`:''}
       <div style="text-align:center;font-size:11px;color:#7A6A5E;margin-top:4px;font-family:'Plus Jakarta Sans',sans-serif">${[shop.adresse,shop.ville,shop.tel].filter(Boolean).join(' · ')}</div>
+      ${shop.nif?`<div style="text-align:center;font-size:10px;color:#7A6A5E;margin-top:3px;font-family:'JetBrains Mono',monospace">N° Contribuable: ${shop.nif}${shop.regime?' · '+shop.regime:''}</div>`:''}`
       <div style="text-align:center;margin:10px 0 6px;background:#F8F2EC;border-radius:6px;padding:6px;font-size:11px;color:#7A6A5E">N° <strong>${v.num}</strong> &nbsp;·&nbsp; ${dStr} &nbsp;·&nbsp; ${hStr}</div>
       ${clientBlock}
       <hr style="border:none;border-top:1px dashed #C8A882;margin:10px 0">
@@ -1277,6 +2246,7 @@ function printRecu(format, vente) {
         ${shop.activite ? shop.activite + '<br>' : ''}
         ${shop.adresse ? shop.adresse + '<br>' : ''}
         ${shop.ville ? shop.ville + ' ' : ''}${shop.tel ? '· ' + shop.tel : ''}
+        ${shop.nif ? '<br>NIF: ' + shop.nif + (shop.regime ? ' · ' + shop.regime : '') : ''}
       </div>
       <hr class="p-sep">
       <div class="p-meta">
@@ -1304,6 +2274,7 @@ function printRecu(format, vente) {
             ${shop.activite ? shop.activite + '<br>' : ''}
             ${shop.adresse ? shop.adresse + '<br>' : ''}
             ${shop.ville || ''} ${shop.tel ? '· Tél: ' + shop.tel : ''}
+            ${shop.nif ? '<br>N° Contribuable: ' + shop.nif + (shop.regime ? ' · ' + shop.regime : '') : ''}
           </div>
         </div>
         <div class="p-a4-recu-badge">
@@ -1424,10 +2395,25 @@ function renderHistorique() {
     const depenses = [...getDepenses()].sort((a,b)=>new Date(b.date)-new Date(a.date));
     if(!depenses.length) { el.innerHTML='<div class="empty-state"><div class="empty-ico">💸</div><div class="empty-title">Aucune dépense enregistrée</div></div>'; htotal.textContent=''; return; }
     const total = depenses.reduce((s,d)=>s+d.montant,0);
-    htotal.textContent = fmoney(total)+' FCFA';
+    const now = new Date(); const mKey = now.getMonth()+'-'+now.getFullYear();
+    const totalMois = depenses.filter(d=>{const dd=new Date(d.date);return(dd.getMonth()+'-'+dd.getFullYear())===mKey;}).reduce((s,d)=>s+d.montant,0);
+    htotal.textContent = fmoney(total)+' FCFA total';
+    // Résumé par catégorie
+    const byCat={};
+    depenses.forEach(d=>{if(!byCat[d.cat])byCat[d.cat]=0;byCat[d.cat]+=d.montant;});
+    const resumeCat=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([cat,tot])=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span>${cat}</span><span style="font-weight:700;color:var(--red)">${fmoney(tot)} F</span></div>`).join('');
     const groups={};
     depenses.forEach(d=>{const k=new Date(d.date).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});if(!groups[k])groups[k]=[];groups[k].push(d);});
-    el.innerHTML=Object.entries(groups).map(([date,ds])=>`
+    el.innerHTML=`
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+          <div><div class="stat-label">Ce mois</div><div class="stat-value" style="color:var(--red)">${fmoney(totalMois)}<span class="u">F</span></div></div>
+          <div><div class="stat-label">Total</div><div class="stat-value">${fmoney(total)}<span class="u">F</span></div></div>
+        </div>
+        <div class="card-title" style="margin-bottom:8px">Par catégorie</div>
+        ${resumeCat}
+      </div>
+    `+Object.entries(groups).map(([date,ds])=>`
       <div class="hist-group-lbl">${date}</div>
       ${ds.map(d=>`<div class="hist-card">
         <div class="hist-top">
@@ -1462,19 +2448,32 @@ function addStockMouvement(type, produit, detail) {
 // ── PARAMÈTRES ──
 function loadSettingsPage() {
   const s=getShop(),st=getSettings();
-  ['nom','ville','tel','adresse','activite','footer'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)el.value=s[k]||'';});
+  ['nom','ville','tel','adresse','activite','footer','nif'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)el.value=s[k]||'';});
+  const sr=document.getElementById('s-regime');if(sr)sr.value=s.regime||'';
   document.getElementById('tog-dark').className='toggle'+(st.dark?' on':'');
   const pc=document.getElementById('patron-pin-card');if(pc)pc.style.display=isPatron?'block':'none';
+  const dc=document.getElementById('data-card-patron');if(dc)dc.style.display=isPatron?'block':'none';
 }
 function saveShop(){
-  setShop({nom:document.getElementById('s-nom').value.trim()||'Ma Boutique',ville:document.getElementById('s-ville').value.trim(),tel:document.getElementById('s-tel').value.trim(),adresse:document.getElementById('s-adresse').value.trim(),activite:document.getElementById('s-activite').value.trim(),footer:document.getElementById('s-footer').value.trim()});
+  setShop({nom:document.getElementById('s-nom').value.trim()||'Ma Boutique',ville:document.getElementById('s-ville').value.trim(),tel:document.getElementById('s-tel').value.trim(),adresse:document.getElementById('s-adresse').value.trim(),activite:document.getElementById('s-activite').value.trim(),footer:document.getElementById('s-footer').value.trim(),nif:document.getElementById('s-nif').value.trim(),regime:document.getElementById('s-regime').value});
   toast('Boutique sauvegardée ✅','success');
+  updateBoutiqueServeur();
+}
+function saveQuestionSecrete() {
+  if(!isPatron){toast('Mode Patron requis','error');return;}
+  const q=document.getElementById('s-question').value;
+  const r=document.getElementById('s-reponse').value.trim().toLowerCase();
+  if(!q){toast('Choisissez une question','error');return;}
+  if(!r){toast('Entrez la réponse','error');return;}
+  setSecretQ({question:q,reponse:r});
+  document.getElementById('s-reponse').value='';
+  toast('Question secrète mise à jour ✅','success');
 }
 function savePin(){
   if(!isPatron){toast('Mode Patron requis','error');return;}
   const p1=document.getElementById('s-pin').value.trim(),p2=document.getElementById('s-pin2').value.trim();
   if(!p1)return;if(!/^\d{4}$/.test(p1)){toast('PIN = 4 chiffres','error');return;}if(p1!==p2){toast('Les PIN ne correspondent pas','error');return;}
-  setPin(p1);document.getElementById('s-pin').value='';document.getElementById('s-pin2').value='';toast('PIN mis à jour ✅','success');
+  setPin(p1);document.getElementById('s-pin').value='';document.getElementById('s-pin2').value='';toast('PIN mis à jour ✅','success');updatePinServeur(p1);
 }
 function toggleTheme(){const st=getSettings();st.dark=!st.dark;setSettings(st);applyTheme();loadSettingsPage();}
 function applyTheme(){const st=getSettings();document.documentElement.setAttribute('data-theme',st.dark?'dark':'light');document.getElementById('theme-btn').textContent=st.dark?'☀️':'🌙';}
@@ -1907,7 +2906,7 @@ function exportRapportWA(){
 
 // ── IMPORT/EXPORT ──
 function exportData(){
-  const data={products:getProducts(),ventes:getVentes(),shop:getShop(),settings:getSettings(),counter:getCounter(),pin:getPin(),credits:getCredits(),fournisseurs:getFournisseurs(),devis:getDevisList(),depenses:getDepenses(),dvctr:getDevisCounter(),mouvements:getStockMouvements(),version:'6.0',exportDate:new Date().toISOString()};
+  const data={products:getProducts(),ventes:getVentes(),shop:getShop(),settings:getSettings(),counter:getCounter(),pin:getPin(),secretq:getSecretQ(),credits:getCredits(),fournisseurs:getFournisseurs(),devis:getDevisList(),depenses:getDepenses(),dvctr:getDevisCounter(),mouvements:getStockMouvements(),version:'6.1',exportDate:new Date().toISOString()};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='stockci-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(url);toast('Export réussi ✅','success');
 }
@@ -1915,11 +2914,12 @@ function importData(evt){
   const file=evt.target.files[0];if(!file)return;
   const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(!d.products||!d.ventes)throw new Error();if(!confirm('Remplacer toutes les données ?'))return;
   if(d.products)setProducts(d.products);if(d.ventes)setVentes(d.ventes);if(d.shop)setShop(d.shop);if(d.settings)setSettings(d.settings);if(d.counter)setCounter(d.counter);if(d.pin)setPin(d.pin);
+  if(d.secretq)setSecretQ(d.secretq);
   if(d.credits)setCredits(d.credits);if(d.fournisseurs)setFournisseurs(d.fournisseurs);if(d.devis)setDevisList(d.devis);if(d.depenses)setDepenses(d.depenses);if(d.dvctr)setDevisCounter(d.dvctr);
   if(d.mouvements)S.set('sci_mouvs',d.mouvements);
   applyTheme();renderAccueil();renderStock();toast('Import réussi ✅','success');}catch{toast('Fichier invalide ❌','error');}};r.readAsText(file);evt.target.value='';
 }
-function resetAll(){if(!confirm('⚠️ Supprimer TOUTES les données ?'))return;if(!confirm('Dernière confirmation — irréversible.'))return;['sci_prod','sci_vent','sci_shop','sci_set','sci_ctr','sci_pin','sci_credits','sci_fourns','sci_devis','sci_depenses','sci_dvctr','sci_mouvs'].forEach(k=>S.del(k));location.reload();}
+function resetAll(){if(!confirm('⚠️ Supprimer TOUTES les données ?'))return;if(!confirm('Dernière confirmation — irréversible.'))return;['sci_prod','sci_vent','sci_shop','sci_set','sci_ctr','sci_pin','sci_secretq','sci_credits','sci_fourns','sci_devis','sci_depenses','sci_dvctr','sci_mouvs'].forEach(k=>S.del(k));location.reload();}
 
 // ── UTILS ──
 function fmoney(n){return Math.round(n||0).toLocaleString('fr-FR');}
@@ -1930,5 +2930,118 @@ document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{
 
 init();
 </script>
+
+<!-- PAGE CGU -->
+<div class="page" id="page-cgu" style="display:none;position:fixed;inset:0;z-index:400;background:var(--bg);overflow-y:auto;padding:20px 16px 40px">
+  <div style="max-width:640px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
+      <button onclick="document.getElementById('page-cgu').style.display='none'" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text2)">←</button>
+      <div style="font-size:18px;font-weight:800;color:var(--text)">Conditions & Confidentialité</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:12px">📋 Conditions Générales d'Utilisation</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.7">
+        <p style="margin-bottom:10px"><strong>Dernière mise à jour :</strong> Avril 2026</p>
+        <p style="margin-bottom:10px"><strong>1. Objet</strong><br>StockCI Pro est une application de gestion de stock destinée aux commerces et PME en Côte d'Ivoire. En utilisant cette application, vous acceptez les présentes conditions.</p>
+        <p style="margin-bottom:10px"><strong>2. Utilisation</strong><br>L'application est fournie pour un usage commercial légal uniquement. Il est interdit de l'utiliser à des fins frauduleuses ou illégales.</p>
+        <p style="margin-bottom:10px"><strong>3. Compte et accès</strong><br>Vous êtes responsable de la confidentialité de votre code PIN. En cas de perte, utilisez la question secrète pour récupérer l'accès.</p>
+        <p style="margin-bottom:10px"><strong>4. Disponibilité</strong><br>Nous nous efforçons d'assurer la disponibilité du service. Cependant, des interruptions peuvent survenir pour maintenance ou en cas de force majeure.</p>
+        <p style="margin-bottom:10px"><strong>5. Propriété intellectuelle</strong><br>L'application et son code source sont la propriété exclusive de l'éditeur. Toute reproduction ou distribution sans autorisation est interdite.</p>
+        <p style="margin-bottom:10px"><strong>6. Limitation de responsabilité</strong><br>L'éditeur ne saurait être tenu responsable des pertes de données résultant d'une mauvaise utilisation ou d'une panne matérielle.</p>
+        <p><strong>7. Droit applicable</strong><br>Les présentes conditions sont régies par le droit ivoirien.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:12px">🔒 Politique de Confidentialité</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.7">
+        <p style="margin-bottom:10px"><strong>1. Données collectées</strong><br>Nous collectons uniquement les données nécessaires au fonctionnement de l'application : nom de boutique, numéro de téléphone, données de stock et de ventes.</p>
+        <p style="margin-bottom:10px"><strong>2. Utilisation des données</strong><br>Vos données sont utilisées exclusivement pour le fonctionnement de votre boutique. Elles ne sont jamais vendues ni partagées avec des tiers.</p>
+        <p style="margin-bottom:10px"><strong>3. Hébergement</strong><br>Vos données sont hébergées de manière sécurisée sur des serveurs en Europe via Supabase, conformément aux standards RGPD.</p>
+        <p style="margin-bottom:10px"><strong>4. Accès à vos données</strong><br>Vous pouvez à tout moment exporter, modifier ou supprimer vos données depuis les Réglages de l'application.</p>
+        <p style="margin-bottom:10px"><strong>5. Sécurité</strong><br>Vos données sont protégées par un code PIN et un système de question secrète. Nous utilisons le chiffrement HTTPS pour toutes les communications.</p>
+        <p style="margin-bottom:10px"><strong>6. Conservation</strong><br>Vos données sont conservées tant que votre compte est actif. En cas de suppression, elles sont effacées définitivement sous 30 jours.</p>
+        <p><strong>7. Contact</strong><br>Pour toute question relative à vos données personnelles, contactez-nous via WhatsApp ou email indiqués dans l'application.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:12px">📱 Version de l'application</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.8">
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Version</span><span style="font-weight:700;font-family:'JetBrains Mono',monospace" id="app-version-display">v8.0</span></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Dernière mise à jour</span><span style="font-weight:700">Avril 2026</span></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0"><span>Développé par</span><span style="font-weight:700">Flow Solutions CI</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE ADMIN -->
+<div class="page" id="page-admin" style="display:none;position:fixed;inset:0;z-index:400;background:var(--bg);overflow-y:auto;padding:0">
+  <div style="background:#2C1A0E;padding:16px;position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between">
+    <div style="color:white;font-size:16px;font-weight:800">👑 Admin StockCI</div>
+    <button onclick="closeAdmin()" style="background:rgba(255,255,255,.15);border:none;color:white;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif">Fermer ✕</button>
+  </div>
+  <div style="padding:16px;max-width:640px;margin:0 auto">
+    <!-- Stats globales -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px" id="admin-stats"></div>
+    <!-- Recherche -->
+    <div class="search-wrap" style="margin-bottom:14px">
+      <span class="search-ico">🔍</span>
+      <input class="form-input" id="admin-search" placeholder="Rechercher boutique..." oninput="filterBoutiques()" style="padding-left:38px">
+    </div>
+    <!-- Liste boutiques -->
+    <div id="admin-boutiques-list"></div>
+  </div>
+</div>
+
+<!-- MODAL: Détail boutique admin -->
+<div class="overlay" id="modal-admin-boutique">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeModal('modal-admin-boutique')">✕</button>
+    <div class="modal-title" id="ab-titre">Boutique</div>
+    <div id="ab-infos"></div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+      <button id="ab-btn-statut" class="btn btn-primary" onclick="toggleStatutBoutique()"></button>
+      <div class="form-group">
+        <label class="form-label">Date d'expiration</label>
+        <input class="form-input" id="ab-expiration" type="date">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Plan</label>
+        <select class="form-select" id="ab-plan">
+          <option value="gratuit">Gratuit</option>
+          <option value="starter">Starter — 15 000 F</option>
+          <option value="pro">Pro — 2 500 F/mois</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Note admin</label>
+        <input class="form-input" id="ab-note" placeholder="Ex: Paiement en attente...">
+      </div>
+      <button class="btn btn-primary" onclick="sauvegarderAdmin()">💾 Sauvegarder</button>
+      <button class="btn btn-danger" onclick="supprimerBoutique()" style="margin-top:4px">🗑️ Supprimer définitivement</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-admin-boutique')">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Connexion Admin -->
+<div class="overlay" id="modal-admin-login">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeModal('modal-admin-login')">✕</button>
+    <div class="modal-title">👑 Accès Administrateur</div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Réservé au développeur et gestionnaire de la plateforme.</p>
+    <div class="form-group">
+      <label class="form-label">Code administrateur</label>
+      <input class="form-input" id="admin-code-input" type="password" placeholder="Code admin">
+    </div>
+    <div style="color:var(--red);font-size:13px;font-weight:600;min-height:20px;margin-bottom:10px" id="admin-login-error"></div>
+    <button class="btn btn-primary" onclick="verifierAdmin()">Accéder →</button>
+  </div>
+</div>
 </body>
 </html>
